@@ -1,0 +1,242 @@
+# XTC i28 (sp9820e_xtc_i28) —— TWRP 3.7.0_9 (Android 9.0 manifest)
+#
+# 为什么是 9.0：
+#   D3TWRP.img（TuberMain/Cms 编译）实机 `twrp` 报 "TWRP version 3.7.0_9-0"，
+#   而 3.7.0_9 只能由 platform_manifest_twrp_omni 的 twrp-9.0 分支编出。
+#   之前用 twrp-4.4-deprecated 编的是 TWRP 3.1，显示层(minuitwrp/ADF)与
+#   这颗 kernel 4.4.83 不匹配，实机卡第一屏（内核活着，recovery 进程起不来）。
+#
+# 触摸为什么之前没有：
+#   实机 dmesg 显示 cyttsp5 在 t=66s 收到 cyttsp5_adf_notifier_callback: POWERDOWN!
+#   → cyttsp5_core_suspend → cyttsp5 TP sleep，之后 resume 全部 -62(ETIME)，
+#   I2C 再也叫不醒（hw_reset 也超时）。触发源是 TWRP 启动时的
+#   TW_SCREEN_BLANK_ON_BOOT := true（recovery.log 里 "Setting brightness control to 0"）。
+#   所以这里把 SCREEN_BLANK 关掉，并禁用空闲关屏，让触摸 IC 保持 probe 后的醒着状态。
+name: Build TWRP 3.7 (Android 9.0)
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      DEVICE_TREE_BRANCH:
+        description: '设备树分支'
+        required: true
+        default: 'twrp-4.4'
+        type: choice
+        options:
+          - twrp-4.4
+      runner:
+        description: 'Runner 标签'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - ubuntu-latest-4-cores
+          - ubuntu-latest-8-cores
+          - ubuntu-latest-16-cores
+      BUILD_TARGET:
+        description: '编译目标分区'
+        required: true
+        default: 'recovery'
+        type: choice
+        options:
+          - recovery
+          - boot
+      DISABLE_BLANK:
+        description: '关闭启动黑屏（触摸修复，必须 true）'
+        required: true
+        default: true
+        type: boolean
+      fresh_ccache:
+        description: '丢弃 ccache 缓存'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  MANIFEST_URL: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni
+  MANIFEST_BRANCH: twrp-9.0
+  DEVICE_TREE_URL: https://github.com/TuberMain/twrp_device_sp9820e_xtc_i28
+  DEVICE_PATH: device/xtc/sp9820e_xtc_i28
+  DEVICE_NAME: sp9820e_xtc_i28
+  MAKEFILE_NAME: omni_sp9820e_xtc_i28
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 350
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      LC_ALL: "C.UTF-8"
+      USE_CCACHE: 1
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_EXEC: /usr/bin/ccache
+
+    steps:
+    - name: Check Out
+      uses: actions/checkout@v4
+
+    - name: Prepare the environment
+      run: |
+        sudo apt update
+        sudo apt -y upgrade
+        # ubuntu-22.04 起 lib32ncurses5-dev 改名，用 || true 容错
+        sudo apt -y install gperf gcc-multilib g++-multilib libc6-dev libx11-dev tree \
+          lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev \
+          lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libxml2 lzop pngcrush \
+          schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static \
+          python3 zip unzip || true
+        sudo apt -y install lib32ncurses-dev libncurses5 || true
+        ccache --version | head -n 1
+
+    - name: Install OpenJDK 8
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'zulu'
+        java-version: '8'
+
+    - name: Install repo
+      run: |
+        mkdir -p ~/bin
+        curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+        chmod a+x ~/bin/repo
+        sudo ln -sf ~/bin/repo /usr/bin/repo
+        repo --version 2>&1 | head -n 3 || true
+
+    - name: Initialize repo
+      id: pwd
+      run: |
+        mkdir -p workspace
+        cd workspace
+        echo "workspace-folder=$(pwd)" >> $GITHUB_OUTPUT
+        git config --global user.name "i28-ci"
+        git config --global user.email "i28-ci@users.noreply.github.com"
+        repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
+        echo "=== manifest 里的 recovery 项目指向 ==="
+        grep -A2 'name="android_bootable_recovery"' .repo/manifest.xml || true
+
+    - name: 恢复 ccache
+      if: ${{ inputs.fresh_ccache == false }}
+      uses: actions/cache@v4
+      with:
+        path: .ccache
+        key: ccache-9.0-${{ github.run_id }}
+        restore-keys: |
+          ccache-9.0-
+
+    - name: Repo Sync
+      run: repo sync -j$(nproc --all) --force-sync --no-clone-bundle
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    - name: Clone device tree
+      run: |
+        git clone --depth=1 ${{ env.DEVICE_TREE_URL }} -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    - name: 设备 rc 注入 + 触摸修复（BoardConfig）
+      run: |
+        MK="${{ env.DEVICE_PATH }}/device.mk"
+        BC="${{ env.DEVICE_PATH }}/BoardConfig.mk"
+
+        # 1) 设备专属 rc 必须经 PRODUCT_COPY_FILES 进 PRODUCT_OUT/root
+        {
+          echo ""
+          echo "# --- CI 注入：recovery/root 下的设备专属 rc ---"
+          echo "PRODUCT_COPY_FILES += \\"
+          echo "    \$(LOCAL_PATH)/recovery/root/init.recovery.sp9820e_xtc_i28.rc:root/init.recovery.sp9820e_xtc_i28.rc \\"
+          echo "    \$(LOCAL_PATH)/recovery/root/ueventd.sp9820e_xtc_i28.rc:root/ueventd.sp9820e_xtc_i28.rc"
+        } >> "$MK"
+
+        # 2) 触摸修复：关掉启动黑屏 + 空闲关屏
+        if [ "${{ inputs.DISABLE_BLANK }}" == "true" ]; then
+          sed -i 's/^TW_SCREEN_BLANK_ON_BOOT := true/TW_SCREEN_BLANK_ON_BOOT := false/' "$BC"
+          grep -q '^TW_SCREEN_BLANK_ON_BOOT' "$BC" || echo 'TW_SCREEN_BLANK_ON_BOOT := false' >> "$BC"
+          grep -q '^TW_NO_SCREEN_BLANK' "$BC" || echo 'TW_NO_SCREEN_BLANK := true' >> "$BC"
+          echo "[+] 已关闭启动黑屏 / 空闲关屏"
+        fi
+
+        echo "=== BoardConfig 关键行 ==="
+        grep -nE 'TW_SCREEN_BLANK_ON_BOOT|TW_NO_SCREEN_BLANK|TW_THEME|TW_INPUT_BLACKLIST' "$BC"
+        echo "=== device.mk 尾部 ==="
+        tail -n 8 "$MK"
+
+    - name: Sync Device Dependencies
+      continue-on-error: true
+      run: |
+        DEP="${{ env.DEVICE_PATH }}/omni.dependencies"
+        if [ -f "$DEP" ]; then
+          bash ${GITHUB_WORKSPACE}/scripts/convert.sh "$DEP"
+          repo sync -j$(nproc --all)
+        else
+          echo "[i] 无 omni.dependencies，跳过"
+        fi
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    - name: Set Swap Space
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 12
+
+    - name: ccache 准备
+      run: |
+        # 9.0 的 build/make 用 CCACHE_EXEC，manifest 自带 prebuilts/misc/linux-x86/ccache
+        ccache -M 5G
+        ccache -z
+        ls -l prebuilts/misc/linux-x86/ccache/ccache 2>/dev/null || echo "[i] manifest 未带 ccache，将用系统 /usr/bin/ccache"
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    - name: Building recovery
+      run: |
+        source build/envsetup.sh || true
+        export ALLOW_MISSING_DEPENDENCIES=true
+        export JACK_SERVER_VM_ARGUMENTS="-Dfile.encoding=UTF-8 -XX:+TieredCompilation"
+        lunch ${{ env.MAKEFILE_NAME }}-eng || { echo "[!] lunch 失败"; exit 1; }
+        make clean
+        make ${{ inputs.BUILD_TARGET }}image -j$(nproc --all)
+        echo "=== ccache 统计 ==="
+        ccache -s || true
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    - name: 镜像自检
+      continue-on-error: true
+      run: |
+        IMG=workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ inputs.BUILD_TARGET }}.img
+        ls -l "$IMG"
+        echo "magic     : $(head -c 8 "$IMG")"
+        echo "kernel_sz : $(od -An -tu4 -j8  -N4 "$IMG" | tr -d ' ')"
+        echo "ramdisk_sz: $(od -An -tu4 -j16 -N4 "$IMG" | tr -d ' ')"
+        echo "dt_size   : $(od -An -tu4 -j40 -N4 "$IMG" | tr -d ' ')"
+        echo "cyttsp5   : $(grep -a -o cyttsp5 "$IMG" | wc -l) 处"
+        echo "tsc@24    : $(grep -a -o 'tsc@24' "$IMG" | wc -l) 处"
+        echo "TWRP 版本 : $(grep -a -o 'TWRP 3\.[0-9.]*' "$IMG" | sort -u | tr '\n' ' ')"
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.DEVICE_NAME }}-twrp-3.7-${{ github.run_number }}
+        path: workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ inputs.BUILD_TARGET }}.img
+        if-no-files-found: error
+
+    - name: Upload to Release
+      continue-on-error: true
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ inputs.BUILD_TARGET }}.img
+        name: ${{ env.DEVICE_NAME }}-twrp-3.7-${{ github.run_number }}
+        tag_name: twrp37-${{ github.run_id }}
+        body: |
+          Manifest: ${{ env.MANIFEST_URL }} @ ${{ env.MANIFEST_BRANCH }} (TWRP 3.7.0_9)
+          Device: ${{ env.DEVICE_NAME }}
+          Device tree: ${{ env.DEVICE_TREE_URL }} - ${{ inputs.DEVICE_TREE_BRANCH }}
+          Target: ${{ inputs.BUILD_TARGET }}.img
+          触摸修复: TW_SCREEN_BLANK_ON_BOOT=${{ inputs.DISABLE_BLANK }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
