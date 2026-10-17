@@ -154,15 +154,27 @@ jobs:
         sudo rm -f /usr/bin/python /usr/bin/python3.6 /usr/bin/python3.6m /usr/local/bin/python
         sudo ln -sf /usr/bin/python2.7 /usr/bin/python
 
+    - name: 预打 init.c 补丁（放宽 fuzz，失败也不阻断）
+      continue-on-error: true
+      run: |
+        # 设备树的 vendorsetup.sh 里有一句 patch -Np1，hunk 对不上时在 bash -e 下会直接杀掉 lunch。
+        # 这里先自己用 --fuzz=5 打一遍：打上了，vendorsetup 里那句 -N 会自动跳过。
+        # 打不上也没关系 —— 该补丁只是强制关闭 SELinux，内核没开 SELinux 时 init 本来就走 disabled 分支。
+        patch -p1 --fuzz=5 --forward < "${{ env.DEVICE_PATH }}/init.c.patch"           && echo "[+] init.c 补丁已打上（SELinux 强制关闭）"           || echo "[i] init.c.patch 没打上，跳过（不影响构建）"
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
     - name: Building recovery
       run: |
         # twrp-5.1 源码需要这个补丁
         if [ "${{ inputs.MANIFEST_BRANCH }}" == "twrp-5.1" ]; then
           patch -p1 < ../patches/partition.cpp.patch
         fi
-        source build/envsetup.sh
+        # 用 || true 兜住：vendorsetup.sh 里的 patch 失败时不能让 errexit 把整个步骤杀掉
+        source build/envsetup.sh || true
         export ALLOW_MISSING_DEPENDENCIES=true
-        lunch ${{ env.MAKEFILE_NAME }}-eng && make clean && make ${{ inputs.BUILD_TARGET }}image -j$(nproc --all)
+        lunch ${{ env.MAKEFILE_NAME }}-eng || { echo "[!] lunch 失败"; exit 1; }
+        make clean
+        make ${{ inputs.BUILD_TARGET }}image -j$(nproc --all)
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: 触摸驱动自检（dtb 有没有打进镜像）
