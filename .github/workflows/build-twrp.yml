@@ -24,6 +24,11 @@ on:
           - twrp-4.4-deprecated
           - twrp-5.1
           - twrp-7.1
+      fresh_ccache:
+        description: '丢弃 ccache 缓存，全新编译'
+        required: false
+        default: false
+        type: boolean
       BUILD_TARGET:
         description: '编译目标分区'
         required: true
@@ -50,11 +55,11 @@ jobs:
         shell: bash
     container:
       image: ghcr.io/catthehacker/ubuntu:runner-18.04
-      volumes:
-        - /:/host_root
     env:
       LC_ALL: "C.UTF-8"
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 5G
 
     steps:
     - name: Display Run Parameters
@@ -73,7 +78,8 @@ jobs:
         sudo apt update
         sudo apt install libc6
         sudo apt -y upgrade
-        sudo apt install -yq aptitude bc bison build-essential curl flex g++-multilib gcc-multilib \
+        # ccache 必须装：下面会把它链到 prebuilts/misc/<tag>/ccache/ccache 给 KitKat 构建系统用
+        sudo apt install -yq aptitude bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
           git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool \
           libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush \
           rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python bash tmux
@@ -89,16 +95,14 @@ jobs:
     - name: Check Out
       uses: actions/checkout@v4
 
-    - name: Cleanup (chroot 到宿主删预装软件换磁盘)
-      continue-on-error: true          # 清理只是换磁盘，失败不该让整个构建挂掉
-      run: |
-        sudo chmod +x scripts/cleanup.sh
-        sudo cp scripts/cleanup.sh /host_root/root
-        sudo chmod +x /host_root/root/cleanup.sh
-        # 走 bash 解释器调用：即使 exec 位丢失或挂载了 noexec 也能跑
-        sudo chroot /host_root bash /root/cleanup.sh
-
-    # KitKat 的 build/core/main.mk 只认 Java SE 1.6 / 1.7，给 JDK8 会直接 $(error stop)
+    - name: 恢复 ccache
+      if: ${{ inputs.fresh_ccache == false }}
+      uses: actions/cache@v4
+      with:
+        path: .ccache
+        key: ccache-kitkat-${{ inputs.MANIFEST_BRANCH }}-${{ github.run_id }}
+        restore-keys: |
+          ccache-kitkat-${{ inputs.MANIFEST_BRANCH }}-
     - name: Install OpenJDK 7
       continue-on-error: true
       uses: actions/setup-java@v3
@@ -194,6 +198,24 @@ jobs:
         java -version 2>&1 | head -n 1 | grep '.*[ "]1\.[678][\. "$]'           && echo "[OK] java 版本检查会通过" || echo "[!] 仍会被拦"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
+    - name: 把 ccache 链到 prebuilts/misc（KitKat 只认这个路径）
+      run: |
+        # build/core/combo/select.mk:88 会去找
+        #   prebuilts/misc/<HOST_PREBUILT_TAG>/ccache/ccache
+        # 找不到就 wildcard 为空 → ccache 静默失效（不报错），所以必须补上。
+        for tag in linux-x86 linux-x86_64; do
+          d="prebuilts/misc/$tag/ccache"
+          mkdir -p "$d"
+          if [ -e "$d/ccache" ]; then
+            echo "[i] $d/ccache 已存在（用 manifest 自带的）"
+          else
+            ln -sf "$(command -v ccache)" "$d/ccache"
+            echo "[+] 已链到 $d/ccache"
+          fi
+        done
+        command -v ccache && ccache --version | head -n 1
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
     - name: Building recovery
       run: |
         # twrp-5.1 源码需要这个补丁
@@ -203,9 +225,12 @@ jobs:
         # 用 || true 兜住：vendorsetup.sh 里的 patch 失败时不能让 errexit 把整个步骤杀掉
         source build/envsetup.sh || true
         export ALLOW_MISSING_DEPENDENCIES=true
+        export USE_CCACHE=1
         lunch ${{ env.MAKEFILE_NAME }}-eng || { echo "[!] lunch 失败"; exit 1; }
         make clean
         make ${{ inputs.BUILD_TARGET }}image -j$(nproc --all)
+        echo "=== ccache 统计（命中越多，下次越快）==="
+        ccache -s || true
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: 触摸驱动自检（dtb 有没有打进镜像）
