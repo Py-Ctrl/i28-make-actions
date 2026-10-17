@@ -209,17 +209,27 @@ jobs:
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: 触摸驱动自检（dtb 有没有打进镜像）
+      continue-on-error: true
       run: |
         IMG=workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ inputs.BUILD_TARGET }}.img
         ls -l "$IMG"
-        if strings "$IMG" | grep -qi cyttsp5; then
-          echo "[+] OK：镜像里能搜到 cyttsp5，说明 dt.img 已随 --dt 打包，tsc@24 节点在，触摸可用"
-          strings "$IMG" | grep -oE "cyttsp5[a-z_0-9]*" | sort -u | head
+        echo "=== boot header ==="
+        echo "magic     : $(head -c 8 "$IMG")"
+        echo "kernel_sz : $(od -An -tu4 -j8  -N4 "$IMG" | tr -d ' ')"
+        echo "ramdisk_sz: $(od -An -tu4 -j16 -N4 "$IMG" | tr -d ' ')"
+        echo "dt_size   : $(od -An -tu4 -j40 -N4 "$IMG" | tr -d ' ')"
+        echo "=== 关键字符串（grep -a 直接扫二进制，不用 strings，避免 SIGPIPE）==="
+        echo "cyttsp5      : $(grep -a -o cyttsp5         "$IMG" | wc -l) 处"
+        echo "tsc@24       : $(grep -a -o 'tsc@24'        "$IMG" | wc -l) 处"
+        echo "Linux version: $(grep -a -o 'Linux version' "$IMG" | wc -l) 处"
+        DT=$(od -An -tu4 -j40 -N4 "$IMG" | tr -d ' ')
+        CY=$(grep -a -o cyttsp5 "$IMG" | wc -l)
+        TS=$(grep -a -o 'tsc@24' "$IMG" | wc -l)
+        if [ "${DT:-0}" -gt 0 ] && [ "${CY:-0}" -gt 0 ] && [ "${TS:-0}" -gt 0 ]; then
+          echo "[+] 触摸 OK：dtb 已打包(${DT} 字节)，镜像内含 cyttsp5 与 tsc@24 节点"
         else
-          echo "::warning::镜像里搜不到 cyttsp5 —— dtb 可能没打进去，触摸会失效，请检查 BOARD_MKBOOTIMG_ARGS 的 --dt"
+          echo "::warning::dt_size=${DT} cyttsp5=${CY} tsc@24=${TS} —— 请核对 BOARD_MKBOOTIMG_ARGS 的 --dt"
         fi
-        # 顺带确认内核本体也在
-        strings "$IMG" | grep -qiE "Linux version" && echo "[+] 内核本体已打包"
 
     - name: Upload to Release
       uses: softprops/action-gh-release@v2
