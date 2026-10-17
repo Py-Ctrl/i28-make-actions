@@ -45,6 +45,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    defaults:
+      run:
+        shell: bash
     container:
       image: ghcr.io/catthehacker/ubuntu:runner-18.04
       volumes:
@@ -136,8 +139,13 @@ jobs:
     - name: Sync Device Dependencies
       continue-on-error: true
       run: |
-        bash ${GITHUB_WORKSPACE}/scripts/convert.sh ${{ env.DEVICE_PATH }}/omni.dependencies
-        repo sync -j$(nproc --all)
+        DEP="${{ env.DEVICE_PATH }}/omni.dependencies"
+        if [ -f "$DEP" ]; then
+          bash ${GITHUB_WORKSPACE}/scripts/convert.sh "$DEP"
+          repo sync -j$(nproc --all)
+        else
+          echo "[i] 设备树没有 omni.dependencies，跳过依赖同步"
+        fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Switch to Python2
@@ -148,7 +156,6 @@ jobs:
 
     - name: Building recovery
       run: |
-        set -o pipefail
         # twrp-5.1 源码需要这个补丁
         if [ "${{ inputs.MANIFEST_BRANCH }}" == "twrp-5.1" ]; then
           patch -p1 < ../patches/partition.cpp.patch
