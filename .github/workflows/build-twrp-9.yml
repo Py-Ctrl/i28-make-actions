@@ -162,9 +162,10 @@ jobs:
         fi
 
         echo "=== BoardConfig 关键行 ==="
-        grep -nE 'TW_SCREEN_BLANK_ON_BOOT|TW_NO_SCREEN_BLANK|TW_THEME|TW_INPUT_BLACKLIST' "$BC"
+        grep -nE 'TW_SCREEN_BLANK_ON_BOOT|TW_NO_SCREEN_BLANK|TW_THEME|TW_INPUT_BLACKLIST' "$BC" || true
         echo "=== device.mk 尾部 ==="
         tail -n 8 "$MK"
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Sync Device Dependencies
       continue-on-error: true
