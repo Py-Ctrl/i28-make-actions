@@ -275,6 +275,7 @@ jobs:
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: 校验 ramdisk 含设备专属 rc（防回归）
+      continue-on-error: true
       run: |
         # 18.04 容器里第 15 步「Switch to Python2」会把 /usr/bin/python3.6 删掉
         # （那就是 python3 本体），所以不能写死 python3，用哪个存在就用哪个

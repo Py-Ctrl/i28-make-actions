@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """校验 recovery.img 的 ramdisk 里是否包含设备专属 rc 文件。
 
 用法: python3 check_ramdisk.py <recovery.img> [期望的文件...]
