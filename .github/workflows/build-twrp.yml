@@ -158,6 +158,19 @@ jobs:
         lunch ${{ env.MAKEFILE_NAME }}-eng && make clean && make ${{ inputs.BUILD_TARGET }}image -j$(nproc --all)
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
+    - name: 触摸驱动自检（dtb 有没有打进镜像）
+      run: |
+        IMG=workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ inputs.BUILD_TARGET }}.img
+        ls -l "$IMG"
+        if strings "$IMG" | grep -qi cyttsp5; then
+          echo "[+] OK：镜像里能搜到 cyttsp5，说明 dt.img 已随 --dt 打包，tsc@24 节点在，触摸可用"
+          strings "$IMG" | grep -oE "cyttsp5[a-z_0-9]*" | sort -u | head
+        else
+          echo "::warning::镜像里搜不到 cyttsp5 —— dtb 可能没打进去，触摸会失效，请检查 BOARD_MKBOOTIMG_ARGS 的 --dt"
+        fi
+        # 顺带确认内核本体也在
+        strings "$IMG" | grep -qiE "Linux version" && echo "[+] 内核本体已打包"
+
     - name: Upload to Release
       uses: softprops/action-gh-release@v2
       with:
