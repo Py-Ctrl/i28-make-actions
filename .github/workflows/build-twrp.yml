@@ -124,6 +124,20 @@ jobs:
         git config --global user.email "actions@users.noreply.github.com"
         repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ inputs.MANIFEST_BRANCH }}
 
+    - name: 补 minimal manifest 剥掉的模块
+      run: |
+        mkdir -p .repo/local_manifests
+        cat > .repo/local_manifests/extra.xml <<'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <manifest>
+          <!-- minimal manifest 剥掉了 mksh，但 KitKat 的 build 需要它生成 /system/bin/sh -->
+          <!-- 不写 remote/revision 即继承 default: aosp @ refs/tags/android-4.4.4_r1（原版 KitKat） -->
+          <project path="external/mksh" name="platform/external/mksh" />
+        </manifest>
+        EOF
+        cat .repo/local_manifests/extra.xml
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
     - name: Repo Sync
       run: |
         repo sync -j$(nproc --all) --force-sync > "${{ steps.pwd.outputs.workspace-folder }}/sync.log" 2>&1 \
