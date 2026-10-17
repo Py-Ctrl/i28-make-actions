@@ -73,11 +73,22 @@ jobs:
 
       - name: 加 8G swap
         run: |
-          sudo fallocate -l 8G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          swapon --show
+          # runner 镜像自带 /swapfile 且已 swapon，直接覆盖会 "Text file busy"
+          cur=$(awk '/SwapTotal/ {print $2}' /proc/meminfo || echo 0)
+          echo "当前 swap: $((cur/1024)) MB"
+          if [ "${cur:-0}" -lt 7000000 ]; then
+            sudo swapoff -a || true
+            sudo rm -f /swapfile
+            sudo fallocate -l 8G /swapfile 2>/dev/null \
+              || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile || true
+            sudo swapon /swapfile || echo "[!] swapon 失败，继续编译（16G 内存通常够用）"
+          else
+            echo "swap 已足够，跳过重建"
+          fi
+          swapon --show || true
+          free -h
           df -h /
 
       - name: 安装编译依赖
@@ -90,9 +101,11 @@ jobs:
             libxml2 libxml2-utils lzop pngcrush rsync schedtool \
             squashfs-tools xsltproc zip zlib1g-dev \
             python3 python-is-python3 patch
-          # 32 位宿主库在 22.04 上包名有变，两套都试
-          sudo apt-get install -y --no-install-recommends lib32ncurses5-dev lib32z1-dev \
-            || sudo apt-get install -y --no-install-recommends lib32ncurses-dev lib32z1-dev
+          # 32 位宿主库在 22.04 上包名有变，逐个候选试，装不上也不让 job 挂掉
+          for pkg in lib32ncurses5-dev lib32ncurses-dev lib32z1-dev lib32stdc++6; do
+            sudo apt-get install -y --no-install-recommends "$pkg" \
+              || echo "[!] 跳过 $pkg"
+          done
           sudo curl -fsSL -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
           sudo chmod a+x /usr/local/bin/repo
           git config --global user.name  "actions"
@@ -117,6 +130,7 @@ jobs:
       - name: repo init + sync
         run: |
           set -e
+          set -o pipefail     # 别让 `| tail` 把 repo sync 的失败吞掉
           mkdir -p "$SRC"
           cd "$SRC"
           repo init -u "$MANIFEST" -b "${{ inputs.twrp_branch }}" --depth=1
@@ -131,7 +145,9 @@ jobs:
                      revision="${{ inputs.device_branch }}" />
           </manifest>
           EOF
-          repo sync -c -j"$(nproc)" --no-tags --no-clone-bundle --force-sync 2>&1 | tail -n 20
+          repo sync -c -j"$(nproc)" --no-tags --no-clone-bundle --force-sync > "$SRC/sync.log" 2>&1 \
+            || { echo "===== repo sync 失败，最后 80 行 ====="; tail -n 80 "$SRC/sync.log"; exit 1; }
+          tail -n 20 "$SRC/sync.log"
           # local_manifest 万一没生效就手动兜底
           [ -d "$DEVICE_PATH" ] || git clone -b "${{ inputs.device_branch }}" --depth 1 "$DEVICE_REPO" "$DEVICE_PATH"
           ls -l "$DEVICE_PATH"
