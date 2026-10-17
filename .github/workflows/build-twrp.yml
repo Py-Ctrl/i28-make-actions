@@ -168,13 +168,16 @@ jobs:
     - name: Java 版本兜底（拿不到 JDK7 就放宽 main.mk 检查）
       run: |
         java -version 2>&1 | head -n 1
-        if java -version 2>&1 | head -n 1 | grep -qE '1\.(6|7)\.'; then
-          echo "[+] 已是 JDK 6/7，无需处理"
-        else
-          echo "[!] 仍是 JDK8 —— 放宽 build/core/main.mk 的 java/javac 版本检查"
-          sed -i 's/1\.[67]/1\.[678]/g' build/core/main.mk
-          grep -n 'java_version :=\|javac_version :=' build/core/main.mk
-        fi
+        # Zulu/OpenJDK 新版首行是 "openjdk version "1.7.0_352""，而 KitKat 的正则要求行首是 "java "，
+        # 所以哪怕装对了 JDK7 也会被判为版本不符。两处都放宽：
+        #   1) 版本号 1.6/1.7 -> 1.6/1.7/1.8
+        #   2) 去掉 java_version 那行的 ^java 行首锚定
+        sed -i 's/1\.[67]/1\.[678]/g' build/core/main.mk
+        sed -i '155s/\^java //' build/core/main.mk
+        echo "--- 改后 ---"
+        grep -n 'java_version :=\|javac_version :=' build/core/main.mk
+        echo "--- 实跑校验 ---"
+        java -version 2>&1 | head -n 1 | grep '.*[ "]1\.[678][\. "$]'           && echo "[OK] java 版本检查会通过" || echo "[!] 仍会被拦"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Building recovery
