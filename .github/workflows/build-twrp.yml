@@ -1,0 +1,183 @@
+name: Build TWRP for XTC i28 (sp9820e_xtc_i28)
+
+on:
+  workflow_dispatch:
+    inputs:
+      twrp_branch:
+        description: 'TWRP minimal-manifest 分支'
+        required: true
+        default: 'twrp-11'
+        type: choice
+        options:
+          - twrp-9.0
+          - twrp-11
+          - twrp-12.1
+      device_branch:
+        description: '设备树分支 (TuberMain/twrp_device_sp9820e_xtc_i28)'
+        required: true
+        default: 'twrp-4.4'
+        type: string
+      target:
+        description: '编译目标'
+        required: true
+        default: 'recoveryimage'
+        type: choice
+        options:
+          - recoveryimage
+          - bootimage
+      fresh_ccache:
+        description: '丢弃 ccache 缓存，全新编译'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: twrp-i28
+  cancel-in-progress: false
+
+env:
+  DEVICE: sp9820e_xtc_i28
+  DEVICE_PATH: device/xtc/sp9820e_xtc_i28
+  DEVICE_REPO: https://github.com/TuberMain/twrp_device_sp9820e_xtc_i28
+  MANIFEST: https://github.com/minimal-manifest-twrp/platform_manifest_twrp.git
+  SRC: /home/runner/twrp
+  USE_CCACHE: 1
+  CCACHE_DIR: /home/runner/.ccache
+  CCACHE_SIZE: 5G
+  CCACHE_COMPRESS: 1
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+
+    steps:
+      - name: 环境信息
+        run: |
+          echo "CPU: $(nproc)"
+          free -h
+          df -h /
+
+      # GitHub 托管 runner 只有约 14G 可用盘，必须先把预装的
+      # Android SDK / .NET / Haskell / Docker 镜像删掉换空间
+      - name: 清理磁盘
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: 加 8G swap
+        run: |
+          sudo fallocate -l 8G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          swapon --show
+          df -h /
+
+      - name: 安装编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache curl flex gperf \
+            gcc-multilib g++-multilib git git-core gnupg \
+            libelf-dev liblz4-tool libncurses-dev libssl-dev \
+            libxml2 libxml2-utils lzop pngcrush rsync schedtool \
+            squashfs-tools xsltproc zip zlib1g-dev \
+            python3 python-is-python3 patch
+          # 32 位宿主库在 22.04 上包名有变，两套都试
+          sudo apt-get install -y --no-install-recommends lib32ncurses5-dev lib32z1-dev \
+            || sudo apt-get install -y --no-install-recommends lib32ncurses-dev lib32z1-dev
+          sudo curl -fsSL -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+          sudo chmod a+x /usr/local/bin/repo
+          git config --global user.name  "actions"
+          git config --global user.email "actions@github.com"
+          df -h /
+
+      - name: JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.twrp_branch == 'twrp-9.0' && '8' || '11' }}
+
+      - name: 恢复 ccache
+        if: ${{ !inputs.fresh_ccache }}
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ inputs.twrp_branch }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ inputs.twrp_branch }}-
+
+      - name: repo init + sync
+        run: |
+          set -e
+          mkdir -p "$SRC"
+          cd "$SRC"
+          repo init -u "$MANIFEST" -b "${{ inputs.twrp_branch }}" --depth=1
+          mkdir -p .repo/local_manifests
+          cat > .repo/local_manifests/i28.xml <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <manifest>
+            <remote name="github" fetch="https://github.com" />
+            <project name="TuberMain/twrp_device_sp9820e_xtc_i28"
+                     path="${DEVICE_PATH}"
+                     remote="github"
+                     revision="${{ inputs.device_branch }}" />
+          </manifest>
+          EOF
+          repo sync -c -j"$(nproc)" --no-tags --no-clone-bundle --force-sync 2>&1 | tail -n 20
+          # local_manifest 万一没生效就手动兜底
+          [ -d "$DEVICE_PATH" ] || git clone -b "${{ inputs.device_branch }}" --depth 1 "$DEVICE_REPO" "$DEVICE_PATH"
+          ls -l "$DEVICE_PATH"
+          df -h /
+
+      - name: 删除 .repo 回收空间
+        run: |
+          du -sh "$SRC/.repo" 2>/dev/null || true
+          rm -rf "$SRC/.repo"
+          df -h /
+
+      - name: 换行符体检 (CRLF 会让 make / init 直接炸)
+        run: |
+          cd "$SRC"
+          find "$DEVICE_PATH" -type f \
+            \( -name '*.mk' -o -name '*.rc' -o -name '*.sh' -o -name '*.fstab' -o -name '*.patch' -o -name 'Android.bp' \) \
+            -print0 | xargs -0 -r sed -i 's/\r$//'
+          echo "OK"
+
+      - name: make ${{ inputs.target }}
+        run: |
+          set -e
+          cd "$SRC"
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export LC_ALL=C
+          # shellcheck disable=SC1091
+          . build/envsetup.sh
+          lunch omni_${DEVICE}-eng
+          make -j"$(nproc)" ${{ inputs.target }}
+
+      - name: 收集产物
+        run: |
+          mkdir -p out
+          cd "$SRC/out/target/product/$DEVICE"
+          ls -lh *.img 2>/dev/null || true
+          for f in recovery.img boot.img; do
+            [ -f "$f" ] && cp -f "$f" "$GITHUB_WORKSPACE/out/$DEVICE-$f" || true
+          done
+          cd "$GITHUB_WORKSPACE/out"
+          ls -l
+          md5sum * 2>/dev/null | tee "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传镜像
+        uses: actions/upload-artifact@v4
+        with:
+          name: twrp-i28-${{ inputs.twrp_branch }}-run${{ github.run_number }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
