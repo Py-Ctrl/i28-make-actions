@@ -161,27 +161,19 @@ jobs:
         df -h /
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: 压掉 clang Sema 的 -Wmaybe-uninitialized
+    - name: 全局关告警（GCC7 编 2013 年代码刷 2400 条）
       run: |
-        # KitKat 没有 Soong：external/clang 是纯 Android.mk（Android.bp 404）
-        # libclangSema 定义在 external/clang/lib/Sema/Android.mk，
-        # 经 clang-host-build.mk 的 `LOCAL_CFLAGS := ... $(LOCAL_CFLAGS)` 把模块自己的追加到最后。
-        # GCC7 上整个构建刷 239 条 maybe-uninitialized，其中 217 条来自 external/，
-        # 主体就是本模块 `‘*((void*)(&X)+N).llvm::SmallDenseMap<...>’` 这类经典假警告。
-        # 全部是 warning，0 个 error —— 这一步纯属清噪音。
-        F="external/clang/lib/Sema/Android.mk"
-        if [ ! -f "$F" ]; then
-          echo "[!] 找不到 $F（external/clang 结构变了？），跳过"
-          exit 0
-        fi
-        if grep -q "Wno-maybe-uninitialized" "$F"; then
-          echo "[i] 补丁已存在，跳过"
+        # build/core/config.mk:415-445 是先 -Wall 再若干 +=；
+        # 在文件末尾追加 -w 会排在最后，从而覆盖前面所有 -W 开关。
+        # 告警全是 warning（0 error），关掉只影响日志量，不影响产物。
+        F=build/core/config.mk
+        if grep -q 'CI-WNO-ALL' "$F"; then
+          echo '[i] 已打过，跳过'
         else
-          sed -i 's|^LOCAL_MODULE:= libclangSema|LOCAL_CFLAGS += -Wno-maybe-uninitialized\nLOCAL_MODULE:= libclangSema|' "$F"
-          echo "[+] 已插入 -Wno-maybe-uninitialized"
+          printf '\n# CI-WNO-ALL: GCC7 + 2013 代码 -> 2400 条 warning，全局关掉\nHOST_GLOBAL_CFLAGS += -w\nHOST_GLOBAL_CPPFLAGS += -w\nTARGET_GLOBAL_CFLAGS += -w\nTARGET_GLOBAL_CPPFLAGS += -w\n' >> "$F"
+          echo '[+] 已追加 -w'
         fi
-        echo '--- 改动确认 ---'
-        grep -n -B2 -A1 'libclangSema' "$F" | tail -n 8
+        tail -n 6 "$F"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Clone device tree
