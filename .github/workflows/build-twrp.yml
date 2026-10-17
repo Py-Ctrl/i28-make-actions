@@ -29,6 +29,17 @@ on:
         required: false
         default: false
         type: boolean
+      runner:
+        description: 'Runner 标签（更大核数更快；self-hosted 见 README）'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - ubuntu-24.04
+          - ubuntu-latest-4-cores
+          - ubuntu-latest-8-cores
+          - ubuntu-latest-16-cores
       BUILD_TARGET:
         description: '编译目标分区'
         required: true
@@ -48,7 +59,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 350
     defaults:
       run:
