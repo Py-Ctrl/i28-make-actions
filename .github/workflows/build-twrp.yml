@@ -172,7 +172,7 @@ jobs:
         # 所以哪怕装对了 JDK7 也会被判为版本不符。两处都放宽：
         #   1) 版本号 1.6/1.7 -> 1.6/1.7/1.8
         #   2) 去掉 java_version 那行的 ^java 行首锚定
-        sed -i 's/1\.[67]/1\.[678]/g' build/core/main.mk
+        sed -i 's/1\\\.\[67\]/1\\\.\[678\]/g' build/core/main.mk
         sed -i '155s/\^java //' build/core/main.mk
         echo "--- 改后 ---"
         grep -n 'java_version :=\|javac_version :=' build/core/main.mk
