@@ -98,11 +98,13 @@ jobs:
         # 走 bash 解释器调用：即使 exec 位丢失或挂载了 noexec 也能跑
         sudo chroot /host_root bash /root/cleanup.sh
 
-    - name: Install OpenJDK 8
+    # KitKat 的 build/core/main.mk 只认 Java SE 1.6 / 1.7，给 JDK8 会直接 $(error stop)
+    - name: Install OpenJDK 7
+      continue-on-error: true
       uses: actions/setup-java@v3
       with:
         distribution: 'zulu'
-        java-version: '8'
+        java-version: '7'
 
     - name: Install repo
       run: |
@@ -161,6 +163,18 @@ jobs:
         # 这里先自己用 --fuzz=5 打一遍：打上了，vendorsetup 里那句 -N 会自动跳过。
         # 打不上也没关系 —— 该补丁只是强制关闭 SELinux，内核没开 SELinux 时 init 本来就走 disabled 分支。
         patch -p1 --fuzz=5 --forward < "${{ env.DEVICE_PATH }}/init.c.patch"           && echo "[+] init.c 补丁已打上（SELinux 强制关闭）"           || echo "[i] init.c.patch 没打上，跳过（不影响构建）"
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    - name: Java 版本兜底（拿不到 JDK7 就放宽 main.mk 检查）
+      run: |
+        java -version 2>&1 | head -n 1
+        if java -version 2>&1 | head -n 1 | grep -qE '1\.(6|7)\.'; then
+          echo "[+] 已是 JDK 6/7，无需处理"
+        else
+          echo "[!] 仍是 JDK8 —— 放宽 build/core/main.mk 的 java/javac 版本检查"
+          sed -i 's/1\.[67]/1\.[678]/g' build/core/main.mk
+          grep -n 'java_version :=\|javac_version :=' build/core/main.mk
+        fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Building recovery
