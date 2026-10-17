@@ -250,7 +250,12 @@ jobs:
 
     - name: 校验 ramdisk 含设备专属 rc（防回归）
       run: |
-        python3 ${GITHUB_WORKSPACE}/scripts/check_ramdisk.py \
+        # 18.04 容器里第 15 步「Switch to Python2」会把 /usr/bin/python3.6 删掉
+        # （那就是 python3 本体），所以不能写死 python3，用哪个存在就用哪个
+        PY=python
+        command -v python3 >/dev/null 2>&1 && PY=python3
+        echo "using: $PY ($($PY --version 2>&1))"
+        "$PY" ${GITHUB_WORKSPACE}/scripts/check_ramdisk.py \
           workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ inputs.BUILD_TARGET }}.img
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
