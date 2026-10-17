@@ -1,2 +1,2 @@
-* text=auto eol=lf
-*.img binary
+# Auto detect text files and perform LF normalization
+* text=auto

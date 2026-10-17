@@ -1,199 +1,178 @@
-name: Build TWRP for XTC i28 (sp9820e_xtc_i28)
+# XTC i28 (sp9820e_xtc_i28) TWRP —— KitKat 老源码专用通道
+#
+# 配方来自 TuberMain/Action-TWRP-Builder 的 "Recovery Build (Ubuntu 18.04)"，
+# 该分支就是作者为 KitKat / Lollipop 老设备准备的（Ubuntu 18.04 容器 + GLIBC 2.28 + Python2 + JDK8）。
+# 本文件在它的基础上：
+#   - 预填好 i28 的全部参数（原版自动推导会把 sp9820e_xtc_i28 拆错）
+#   - MANIFEST 指向真实存在的 twrp-4.4-deprecated 分支
+#   - 修掉 .dependencies 路径取空的问题
+#   - 额外用 upload-artifact 保底（Release 挂了也能拿到镜像）
+name: Build TWRP (KitKat / Legacy)
+
+permissions:
+  contents: write
 
 on:
   workflow_dispatch:
     inputs:
-      twrp_branch:
-        description: 'TWRP minimal-manifest 分支'
+      MANIFEST_BRANCH:
+        description: 'omni manifest 分支（不确定就用默认）'
         required: true
-        default: 'twrp-11'
+        default: 'twrp-4.4-deprecated'
         type: choice
         options:
-          - twrp-9.0
-          - twrp-11
-          - twrp-12.1
-      device_branch:
-        description: '设备树分支 (TuberMain/twrp_device_sp9820e_xtc_i28)'
+          - twrp-4.4-deprecated
+          - twrp-5.1
+          - twrp-7.1
+      BUILD_TARGET:
+        description: '编译目标分区'
         required: true
-        default: 'twrp-4.4'
-        type: string
-      target:
-        description: '编译目标'
-        required: true
-        default: 'recoveryimage'
+        default: 'recovery'
         type: choice
         options:
-          - recoveryimage
-          - bootimage
-      fresh_ccache:
-        description: '丢弃 ccache 缓存，全新编译'
-        required: false
-        default: false
-        type: boolean
-
-concurrency:
-  group: twrp-i28
-  cancel-in-progress: false
+          - recovery
+          - boot
 
 env:
-  DEVICE: sp9820e_xtc_i28
+  MANIFEST_URL: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni
+  DEVICE_TREE_URL: https://github.com/TuberMain/twrp_device_sp9820e_xtc_i28
+  DEVICE_TREE_BRANCH: twrp-4.4
   DEVICE_PATH: device/xtc/sp9820e_xtc_i28
-  DEVICE_REPO: https://github.com/TuberMain/twrp_device_sp9820e_xtc_i28
-  MANIFEST: https://github.com/minimal-manifest-twrp/platform_manifest_twrp.git
-  SRC: /home/runner/twrp
-  USE_CCACHE: 1
-  CCACHE_DIR: /home/runner/.ccache
-  CCACHE_SIZE: 5G
-  CCACHE_COMPRESS: 1
+  DEVICE_NAME: sp9820e_xtc_i28
+  MAKEFILE_NAME: omni_sp9820e_xtc_i28
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 350
+    container:
+      image: ghcr.io/catthehacker/ubuntu:runner-18.04
+      volumes:
+        - /:/host_root
+    env:
+      LC_ALL: "C.UTF-8"
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
     steps:
-      - name: 环境信息
-        run: |
-          echo "CPU: $(nproc)"
-          free -h
-          df -h /
+    - name: Display Run Parameters
+      run: |
+        echo "::group::Run Parameters"
+        echo "Manifest    : ${{ env.MANIFEST_URL }} @ ${{ inputs.MANIFEST_BRANCH }}"
+        echo "Device tree : ${{ env.DEVICE_TREE_URL }} @ ${{ env.DEVICE_TREE_BRANCH }}"
+        echo "Device path : ${{ env.DEVICE_PATH }}"
+        echo "Device name : ${{ env.DEVICE_NAME }}"
+        echo "Makefile    : ${{ env.MAKEFILE_NAME }}"
+        echo "Target      : ${{ inputs.BUILD_TARGET }}.img"
+        echo "::endgroup::"
 
-      # GitHub 托管 runner 只有约 14G 可用盘，必须先把预装的
-      # Android SDK / .NET / Haskell / Docker 镜像删掉换空间
-      - name: 清理磁盘
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: false
+    - name: Prepare the environment
+      run: |
+        sudo apt update
+        sudo apt install libc6
+        sudo apt -y upgrade
+        sudo apt install -yq aptitude bc bison build-essential curl flex g++-multilib gcc-multilib \
+          git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool \
+          libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush \
+          rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python bash tmux
 
-      - name: 加 8G swap
-        run: |
-          # runner 镜像自带 /swapfile 且已 swapon，直接覆盖会 "Text file busy"
-          cur=$(awk '/SwapTotal/ {print $2}' /proc/meminfo || echo 0)
-          echo "当前 swap: $((cur/1024)) MB"
-          if [ "${cur:-0}" -lt 7000000 ]; then
-            sudo swapoff -a || true
-            sudo rm -f /swapfile
-            sudo fallocate -l 8G /swapfile 2>/dev/null \
-              || sudo dd if=/dev/zero of=/swapfile bs=1M count=8192 status=none
-            sudo chmod 600 /swapfile
-            sudo mkswap /swapfile || true
-            sudo swapon /swapfile || echo "[!] swapon 失败，继续编译（16G 内存通常够用）"
-          else
-            echo "swap 已足够，跳过重建"
-          fi
-          swapon --show || true
-          free -h
-          df -h /
+    - name: Upgrade GLIBC to 2.28
+      run: |
+        sudo sed -i '$a deb http://archive.debian.org/debian-security buster/updates main' /etc/apt/sources.list
+        sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 112695A0E562B32A 54404762BBB6E853
+        sudo apt update
+        sudo apt install libc6 -y
+        sudo sed -i '$d' /etc/apt/sources.list
 
-      - name: 安装编译依赖
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential ccache curl flex gperf \
-            gcc-multilib g++-multilib git git-core gnupg \
-            libelf-dev liblz4-tool libncurses-dev libssl-dev \
-            libxml2 libxml2-utils lzop pngcrush rsync schedtool \
-            squashfs-tools xsltproc zip zlib1g-dev \
-            python3 python-is-python3 patch
-          # 32 位宿主库在 22.04 上包名有变，逐个候选试，装不上也不让 job 挂掉
-          for pkg in lib32ncurses5-dev lib32ncurses-dev lib32z1-dev lib32stdc++6; do
-            sudo apt-get install -y --no-install-recommends "$pkg" \
-              || echo "[!] 跳过 $pkg"
-          done
-          sudo curl -fsSL -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
-          sudo chmod a+x /usr/local/bin/repo
-          git config --global user.name  "actions"
-          git config --global user.email "actions@github.com"
-          df -h /
+    - name: Check Out
+      uses: actions/checkout@v4
 
-      - name: JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ inputs.twrp_branch == 'twrp-9.0' && '8' || '11' }}
+    - name: Cleanup (chroot 到宿主删预装软件换磁盘)
+      run: |
+        sudo cp scripts/cleanup.sh /host_root/root
+        sudo chroot /host_root /root/cleanup.sh
 
-      - name: 恢复 ccache
-        if: ${{ !inputs.fresh_ccache }}
-        uses: actions/cache@v4
-        with:
-          path: /home/runner/.ccache
-          key: ccache-${{ inputs.twrp_branch }}-${{ github.run_id }}
-          restore-keys: |
-            ccache-${{ inputs.twrp_branch }}-
+    - name: Install OpenJDK 8
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'zulu'
+        java-version: '8'
 
-      - name: repo init + sync
-        run: |
-          set -e
-          set -o pipefail     # 别让 `| tail` 把 repo sync 的失败吞掉
-          mkdir -p "$SRC"
-          cd "$SRC"
-          repo init -u "$MANIFEST" -b "${{ inputs.twrp_branch }}" --depth=1
-          mkdir -p .repo/local_manifests
-          cat > .repo/local_manifests/i28.xml <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <manifest>
-            <remote name="github" fetch="https://github.com" />
-            <project name="TuberMain/twrp_device_sp9820e_xtc_i28"
-                     path="${DEVICE_PATH}"
-                     remote="github"
-                     revision="${{ inputs.device_branch }}" />
-          </manifest>
-          EOF
-          repo sync -c -j"$(nproc)" --no-tags --no-clone-bundle --force-sync > "$SRC/sync.log" 2>&1 \
-            || { echo "===== repo sync 失败，最后 80 行 ====="; tail -n 80 "$SRC/sync.log"; exit 1; }
-          tail -n 20 "$SRC/sync.log"
-          # local_manifest 万一没生效就手动兜底
-          [ -d "$DEVICE_PATH" ] || git clone -b "${{ inputs.device_branch }}" --depth 1 "$DEVICE_REPO" "$DEVICE_PATH"
-          ls -l "$DEVICE_PATH"
-          df -h /
+    - name: Install repo
+      run: |
+        sudo ln -sf /usr/bin/python3 /usr/bin/python
+        mkdir ~/bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+        chmod a+x ~/bin/repo
+        sudo ln -sf ~/bin/repo /usr/bin/repo
 
-      - name: 删除 .repo 回收空间
-        run: |
-          du -sh "$SRC/.repo" 2>/dev/null || true
-          rm -rf "$SRC/.repo"
-          df -h /
+    - name: Initialize repo
+      id: pwd
+      run: |
+        mkdir workspace
+        cd workspace
+        echo "workspace-folder=$(pwd)" >> $GITHUB_OUTPUT
+        git config --global user.name "Py-Ctrl"
+        git config --global user.email "actions@users.noreply.github.com"
+        repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ inputs.MANIFEST_BRANCH }}
 
-      - name: 换行符体检 (CRLF 会让 make / init 直接炸)
-        run: |
-          cd "$SRC"
-          find "$DEVICE_PATH" -type f \
-            \( -name '*.mk' -o -name '*.rc' -o -name '*.sh' -o -name '*.fstab' -o -name '*.patch' -o -name 'Android.bp' \) \
-            -print0 | xargs -0 -r sed -i 's/\r$//'
-          echo "OK"
+    - name: Repo Sync
+      run: |
+        repo sync -j$(nproc --all) --force-sync > "${{ steps.pwd.outputs.workspace-folder }}/sync.log" 2>&1 \
+          || { echo "===== repo sync 失败，最后 80 行 ====="; tail -n 80 "${{ steps.pwd.outputs.workspace-folder }}/sync.log"; exit 1; }
+        tail -n 20 "${{ steps.pwd.outputs.workspace-folder }}/sync.log"
+        df -h /
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-      - name: make ${{ inputs.target }}
-        run: |
-          set -e
-          cd "$SRC"
-          export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL=C
-          # shellcheck disable=SC1091
-          . build/envsetup.sh
-          lunch omni_${DEVICE}-eng
-          make -j"$(nproc)" ${{ inputs.target }}
+    - name: Clone device tree
+      run: |
+        git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        ls -l ${{ env.DEVICE_PATH }}
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-      - name: 收集产物
-        run: |
-          mkdir -p out
-          cd "$SRC/out/target/product/$DEVICE"
-          ls -lh *.img 2>/dev/null || true
-          for f in recovery.img boot.img; do
-            [ -f "$f" ] && cp -f "$f" "$GITHUB_WORKSPACE/out/$DEVICE-$f" || true
-          done
-          cd "$GITHUB_WORKSPACE/out"
-          ls -l
-          md5sum * 2>/dev/null | tee "$GITHUB_STEP_SUMMARY"
+    - name: Sync Device Dependencies
+      continue-on-error: true
+      run: |
+        bash ${GITHUB_WORKSPACE}/scripts/convert.sh ${{ env.DEVICE_PATH }}/omni.dependencies
+        repo sync -j$(nproc --all)
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-      - name: 上传镜像
-        uses: actions/upload-artifact@v4
-        with:
-          name: twrp-i28-${{ inputs.twrp_branch }}-run${{ github.run_number }}
-          path: out/*
-          if-no-files-found: error
-          retention-days: 30
+    - name: Switch to Python2
+      continue-on-error: true
+      run: |
+        sudo rm -f /usr/bin/python /usr/bin/python3.6 /usr/bin/python3.6m /usr/local/bin/python
+        sudo ln -sf /usr/bin/python2.7 /usr/bin/python
+
+    - name: Building recovery
+      run: |
+        set -o pipefail
+        # twrp-5.1 源码需要这个补丁
+        if [ "${{ inputs.MANIFEST_BRANCH }}" == "twrp-5.1" ]; then
+          patch -p1 < ../patches/partition.cpp.patch
+        fi
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        lunch ${{ env.MAKEFILE_NAME }}-eng && make clean && make ${{ inputs.BUILD_TARGET }}image -j$(nproc --all)
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+    - name: Upload to Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ inputs.BUILD_TARGET }}.img
+        name: ${{ env.DEVICE_NAME }}-${{ inputs.MANIFEST_BRANCH }}-${{ github.run_id }}
+        tag_name: ${{ github.run_id }}
+        body: |
+          Manifest: ${{ env.MANIFEST_URL }} @ ${{ inputs.MANIFEST_BRANCH }}
+          Device: ${{ env.DEVICE_NAME }}
+          Device tree: ${{ env.DEVICE_TREE_URL }} @ ${{ env.DEVICE_TREE_BRANCH }}
+          Target: ${{ inputs.BUILD_TARGET }}.img
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload artifact (保底)
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.DEVICE_NAME }}-${{ inputs.MANIFEST_BRANCH }}-${{ github.run_number }}
+        path: workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ inputs.BUILD_TARGET }}.img
+        if-no-files-found: warn
+        retention-days: 30
