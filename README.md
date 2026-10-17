@@ -46,7 +46,23 @@ fastboot flash recovery sp9820e_xtc_i28-recovery.img
   在 TWRP 3.x（Android 9+）源码上会打不上，但 `patch -Np1` 失败不会中断 lunch，
   只是 SELinux 保持 enforcing —— TWRP 3.x 自身会处理，通常无影响。
 
-## 改自托管 runner（盘不够时的兜底）
+## 提速
+
+构建耗时的大头是 **`external/clang` 从源码编一遍**（KitKat manifest 锁死 `prebuilts/clang 3.3`，AOSP 会把整个 clang 编出来给宿主工具链用），4 核上就要好几分钟。
+
+| 手段 | 效果 | 代价 |
+|---|---|---|
+| ccache（已启用，`ccache -M 5G`） | 第二轮起生效 | 无 |
+| **换 runner 核数**（`runner` 下拉可选 4/8/16 核） | 近似线性 | larger runner 按分钟计费 |
+| **self-hosted runner** | 最快、免费、无 6h 限制 | 需要一台 Linux 机器 |
+| 去掉 `make clean` | 省掉非编译类的重复产出 | 源码变动时可能脏 |
+
+**ccache 注意事项（重要）**：前两轮命中率必然是 0%
+—— 第一轮缓存为空；第二轮的缓存曾被 `CCACHE_MAXSIZE` 环境变量失效导致的 1GB 上限
+用 LRU 挤到只剩 1402 个文件（7884 个编译当然命不中）。
+必须**成功**跑完一轮（`Post 恢复 ccache` 不被 skip）缓存才会完整落盘，之后才看得出效果。
+
+## 改自托管 runner（盘不够 / 想更快的兜底）
 
 有台 Linux 机器（≥150G 盘 / ≥16G 内存）的话：
 
@@ -54,7 +70,9 @@ fastboot flash recovery sp9820e_xtc_i28-recovery.img
     runs-on: self-hosted
 ```
 
-然后在那台机器上装好 GitHub Actions runner 即可，workflow 其余部分不用改。
+然后在 workflow 的 `runner` 输入里选 `self-hosted`（或加自定义标签）。
+**注意**：self-hosted 下 `container:` 不生效，需要把 Ubuntu 18.04 容器那套
+（apt 依赖、GLIBC 2.28、Python2、JDK7）改成直接在宿主机装好。
 
 ## 触摸驱动
 
