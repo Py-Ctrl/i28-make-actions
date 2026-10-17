@@ -87,9 +87,13 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Cleanup (chroot 到宿主删预装软件换磁盘)
+      continue-on-error: true          # 清理只是换磁盘，失败不该让整个构建挂掉
       run: |
+        sudo chmod +x scripts/cleanup.sh
         sudo cp scripts/cleanup.sh /host_root/root
-        sudo chroot /host_root /root/cleanup.sh
+        sudo chmod +x /host_root/root/cleanup.sh
+        # 走 bash 解释器调用：即使 exec 位丢失或挂载了 noexec 也能跑
+        sudo chroot /host_root bash /root/cleanup.sh
 
     - name: Install OpenJDK 8
       uses: actions/setup-java@v3
