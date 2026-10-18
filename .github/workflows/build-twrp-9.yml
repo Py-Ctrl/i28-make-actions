@@ -226,10 +226,13 @@ jobs:
         set -o pipefail
         LOG=/tmp/build.log
         : > "$LOG"
-        source build/envsetup.sh 2>&1 | tee -a "$LOG" | tail -3 || true
+        # source/lunch 必须留在当前 shell：进管道会开子 shell，lunch 函数和 TARGET_* 变量都会丢
+        source build/envsetup.sh >>"$LOG" 2>&1 || true
+        tail -3 "$LOG"
         export ALLOW_MISSING_DEPENDENCIES=true
         export JACK_SERVER_VM_ARGUMENTS="-Dfile.encoding=UTF-8 -XX:+TieredCompilation"
-        lunch ${{ env.MAKEFILE_NAME }}-eng 2>&1 | tee -a "$LOG" | tail -15 || { echo "[!] lunch 失败"; exit 1; }
+        lunch ${{ env.MAKEFILE_NAME }}-eng >>"$LOG" 2>&1 || { echo "[!] lunch 失败"; tail -30 "$LOG"; exit 1; }
+        tail -5 "$LOG"
         make clean >>"$LOG" 2>&1 || true
         echo "[i] make 开始：每 1% 一行进度，warning/error 实时输出；完整日志见 build-log artifact"
         if make ${{ inputs.BUILD_TARGET }}image -j$(nproc --all) 2>&1 | tee -a "$LOG" | awk '
