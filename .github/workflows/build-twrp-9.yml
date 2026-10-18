@@ -145,6 +145,9 @@ jobs:
     - name: Clone device tree
       run: |
         git clone --depth=1 ${{ env.DEVICE_TREE_URL }} -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        # 9.0 的 init 是 init.cpp，init.c.patch 打不上，vendorsetup.sh 里的 patch 会卡在交互提问
+        sed -i 's|^patch -Np1|# &|' ${{ env.DEVICE_PATH }}/vendorsetup.sh
+        grep -n 'patch' ${{ env.DEVICE_PATH }}/vendorsetup.sh || true
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: 设备 rc 注入 + BoardConfig 修正
@@ -223,7 +226,7 @@ jobs:
         set -o pipefail
         LOG=/tmp/build.log
         : > "$LOG"
-        source build/envsetup.sh 2>&1 | tee -a "$LOG" | tail -3
+        source build/envsetup.sh 2>&1 | tee -a "$LOG" | tail -3 || true
         export ALLOW_MISSING_DEPENDENCIES=true
         export JACK_SERVER_VM_ARGUMENTS="-Dfile.encoding=UTF-8 -XX:+TieredCompilation"
         lunch ${{ env.MAKEFILE_NAME }}-eng 2>&1 | tee -a "$LOG" | tail -15 || { echo "[!] lunch 失败"; exit 1; }
