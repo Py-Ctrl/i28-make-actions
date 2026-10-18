@@ -187,8 +187,14 @@ jobs:
           echo "[+] 已关闭启动黑屏 / 空闲关屏"
         fi
 
+        # 3) boot 分区上限：设备树写 12322816(11.75MB)，9.0 的 boot.img 是 11.79MB，
+        #    差 42KB 直接 "boot.img too large"。按分区表 boot=14MB 放宽。
+        #    recovery 上限保持 30MB 不动，避免 9.0 的 ramdisk 变大后又被卡。
+        sed -i 's/^BOARD_BOOTIMAGE_PARTITION_SIZE := .*/BOARD_BOOTIMAGE_PARTITION_SIZE := 14680064/' "$BC"
+        echo "[+] BOARD_BOOTIMAGE_PARTITION_SIZE -> 14680064 (14MB)"
+
         echo "=== BoardConfig 关键行 ==="
-        grep -nE 'TW_SCREEN_BLANK_ON_BOOT|TW_NO_SCREEN_BLANK|TW_THEME|TW_INPUT_BLACKLIST' "$BC" || true
+        grep -nE 'TW_SCREEN_BLANK_ON_BOOT|TW_NO_SCREEN_BLANK|TW_THEME|TW_INPUT_BLACKLIST|PARTITION_SIZE' "$BC" || true
         echo "=== device.mk 尾部 ==="
         tail -n 8 "$MK"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
