@@ -1,17 +1,6 @@
-# XTC i28 (sp9820e_xtc_i28) —— TWRP 3.7.0_9 (Android 9.0 manifest)
-#
-# 为什么是 9.0：
-#   D3TWRP.img（TuberMain/Cms 编译）实机 `twrp` 报 "TWRP version 3.7.0_9-0"，
-#   而 3.7.0_9 只能由 platform_manifest_twrp_omni 的 twrp-9.0 分支编出。
-#   之前用 twrp-4.4-deprecated 编的是 TWRP 3.1，显示层(minuitwrp/ADF)与
-#   这颗 kernel 4.4.83 不匹配，实机卡第一屏（内核活着，recovery 进程起不来）。
-#
-# 触摸为什么之前没有：
-#   实机 dmesg 显示 cyttsp5 在 t=66s 收到 cyttsp5_adf_notifier_callback: POWERDOWN!
-#   → cyttsp5_core_suspend → cyttsp5 TP sleep，之后 resume 全部 -62(ETIME)，
-#   I2C 再也叫不醒（hw_reset 也超时）。触发源是 TWRP 启动时的
-#   TW_SCREEN_BLANK_ON_BOOT := true（recovery.log 里 "Setting brightness control to 0"）。
-#   所以这里把 SCREEN_BLANK 关掉，并禁用空闲关屏，让触摸 IC 保持 probe 后的醒着状态。
+# XTC i28 (sp9820e_xtc_i28) —— TWRP 3.7.0_9
+# 3.7.0_9 只能由 twrp-9.0 manifest 编出；twrp-4.4-deprecated 编的 3.1 会卡第一屏。
+# 触摸：TW_SCREEN_BLANK_ON_BOOT 会让 ADF 给 cyttsp5 发 POWERDOWN，IC 睡死后 I2C 全 -62。
 name: Build TWRP 3.7 (Android 9.0)
 
 permissions:
@@ -87,7 +76,6 @@ jobs:
       run: |
         sudo apt -qq update
         sudo apt -y -qq upgrade
-        # ubuntu-22.04 起 lib32ncurses5-dev 改名，用 || true 容错
         sudo apt -y install gperf gcc-multilib g++-multilib libc6-dev libx11-dev tree \
           lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev \
           lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libxml2 lzop pngcrush \
@@ -102,12 +90,9 @@ jobs:
         distribution: 'zulu'
         java-version: '8'
 
-    - name: 补 ncurses5（AOSP 9.0 prebuilt clang 依赖 libtinfo.so.5）
+    - name: 补 ncurses5
       run: |
-        # prebuilts/clang/host/linux-x86/clang-4691093/bin/clang.real 是 2017 年的二进制，
-        # 硬链接 libtinfo.so.5 / libncurses.so.5；Ubuntu 22.04 起只有 .so.6，
-        # 直接跑会 "error while loading shared libraries: libtinfo.so.5"。
-        # 这里装 bionic(18.04) 的 ncurses5 包，另加软链兜底。
+        # clang-4691093 要 libtinfo.so.5，22.04 只有 .so.6
         BASE=http://archive.ubuntu.com/ubuntu/pool/main/n/ncurses
         cd /tmp
         for p in libtinfo5 libncurses5 libncursesw5 lib32tinfo5 lib32ncurses5; do
@@ -116,14 +101,12 @@ jobs:
         done
         sudo dpkg -i /tmp/libtinfo5_*.deb /tmp/libncurses5_*.deb /tmp/libncursesw5_*.deb \
                       /tmp/lib32tinfo5_*.deb /tmp/lib32ncurses5_*.deb || sudo apt -y -f install
-        # 兜底：deb 没落地就直接软链 .so.6（libtinfo6 保留了 5 的符号）
         for lib in libtinfo libncurses libncursesw; do
           if [ ! -e "/usr/lib/x86_64-linux-gnu/${lib}.so.5" ]; then
             sudo ln -sf "/lib/x86_64-linux-gnu/${lib}.so.6" "/usr/lib/x86_64-linux-gnu/${lib}.so.5" || true
           fi
         done
         sudo ldconfig
-        echo "=== 落地检查 ==="
         ls -l /usr/lib/x86_64-linux-gnu/libtinfo.so.5 /usr/lib/x86_64-linux-gnu/libncurses.so.5 2>&1 || true
         ls -l /usr/lib32/libtinfo.so.5 /usr/lib32/libncurses.so.5 2>&1 || true
 
@@ -144,7 +127,6 @@ jobs:
         git config --global user.name "i28-ci"
         git config --global user.email "i28-ci@users.noreply.github.com"
         repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
-        echo "=== manifest 里的 recovery 项目指向 ==="
         grep -A2 'name="android_bootable_recovery"' .repo/manifest.xml || true
 
     - name: 恢复 ccache
@@ -165,38 +147,30 @@ jobs:
         git clone --depth=1 ${{ env.DEVICE_TREE_URL }} -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: 设备 rc 注入 + 触摸修复（BoardConfig）
+    - name: 设备 rc 注入 + BoardConfig 修正
       run: |
         MK="${{ env.DEVICE_PATH }}/device.mk"
         BC="${{ env.DEVICE_PATH }}/BoardConfig.mk"
 
-        # 1) 设备专属 rc 必须经 PRODUCT_COPY_FILES 进 PRODUCT_OUT/root
+        # recovery/root 不会自动进 ramdisk，必须走 PRODUCT_COPY_FILES
         {
           echo ""
-          echo "# --- CI 注入：recovery/root 下的设备专属 rc ---"
           echo "PRODUCT_COPY_FILES += \\"
           echo "    \$(LOCAL_PATH)/recovery/root/init.recovery.sp9820e_xtc_i28.rc:root/init.recovery.sp9820e_xtc_i28.rc \\"
           echo "    \$(LOCAL_PATH)/recovery/root/ueventd.sp9820e_xtc_i28.rc:root/ueventd.sp9820e_xtc_i28.rc"
         } >> "$MK"
 
-        # 2) 触摸修复：关掉启动黑屏 + 空闲关屏
         if [ "${{ inputs.DISABLE_BLANK }}" == "true" ]; then
           sed -i 's/^TW_SCREEN_BLANK_ON_BOOT := true/TW_SCREEN_BLANK_ON_BOOT := false/' "$BC"
           grep -q '^TW_SCREEN_BLANK_ON_BOOT' "$BC" || echo 'TW_SCREEN_BLANK_ON_BOOT := false' >> "$BC"
           grep -q '^TW_NO_SCREEN_BLANK' "$BC" || echo 'TW_NO_SCREEN_BLANK := true' >> "$BC"
-          echo "[+] 已关闭启动黑屏 / 空闲关屏"
         fi
 
-        # 3) boot 分区上限：设备树写 12322816(11.75MB)，9.0 的 boot.img 是 11.79MB，
-        #    差 42KB 直接 "boot.img too large"。按分区表 boot=14MB 放宽。
-        #    recovery 上限保持 30MB 不动，避免 9.0 的 ramdisk 变大后又被卡。
+        # boot 上限 11.75MB < 实际 11.79MB，按分区表放宽到 14MB
         sed -i 's/^BOARD_BOOTIMAGE_PARTITION_SIZE := .*/BOARD_BOOTIMAGE_PARTITION_SIZE := 14680064/' "$BC"
-        echo "[+] BOARD_BOOTIMAGE_PARTITION_SIZE -> 14680064 (14MB)"
 
-        echo "=== BoardConfig 关键行 ==="
         grep -nE 'TW_SCREEN_BLANK_ON_BOOT|TW_NO_SCREEN_BLANK|TW_THEME|TW_INPUT_BLACKLIST|PARTITION_SIZE' "$BC" || true
-        echo "=== device.mk 尾部 ==="
-        tail -n 8 "$MK"
+        tail -n 6 "$MK"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Sync Device Dependencies
@@ -205,7 +179,7 @@ jobs:
         DEP="${{ env.DEVICE_PATH }}/omni.dependencies"
         if [ -f "$DEP" ]; then
           bash ${GITHUB_WORKSPACE}/scripts/convert.sh "$DEP"
-          repo sync -j$(nproc --all)
+          repo sync -q -j$(nproc --all)
         else
           echo "[i] 无 omni.dependencies，跳过"
         fi
@@ -216,25 +190,19 @@ jobs:
       with:
         swap-size-gb: 12
 
-    - name: ccache 准备 + clang 自检
+    - name: ccache 准备
       run: |
-        # 9.0 的 build/make 用 CCACHE_EXEC，manifest 自带 prebuilts/misc/linux-x86/ccache
         ccache -M 5G
         ccache -z
-        ls -l prebuilts/misc/linux-x86/ccache/ccache 2>/dev/null || echo "[i] manifest 未带 ccache，将用系统 /usr/bin/ccache"
-        echo "=== prebuilt clang 能不能跑（libtinfo.so.5 是否解决）==="
         CLANG=prebuilts/clang/host/linux-x86/clang-4691093/bin/clang.real
         if [ -x "$CLANG" ]; then
-          "$CLANG" --version || { echo "[!] clang.real 仍起不来"; ldd "$CLANG" | grep -i 'not found' || true; exit 1; }
-        else
-          echo "[i] 未找到 clang-4691093，跳过"
+          "$CLANG" --version || { echo "[!] clang.real 起不来"; ldd "$CLANG" | grep -i 'not found' || true; exit 1; }
         fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: 装 Python2 并切为默认 python（AOSP 9.0 的 build 脚本是 py2 语法）
+    - name: 装 Python2
       run: |
-        # build/make/tools/check_radio_versions.py 等脚本用 print "..."（py2），
-        # 22.04 已无 python2，默认 python3 会在生成 android-info.txt 时 SyntaxError。
+        # build/make 脚本是 py2 语法，22.04 无 python2
         BASE=http://archive.ubuntu.com/ubuntu/pool/main/p/python2.7
         V="2.7.17-1~18.04ubuntu1.11"
         cd /tmp
@@ -244,16 +212,10 @@ jobs:
         done
         sudo dpkg -i --force-depends /tmp/libpython2.7-*.deb /tmp/python2.7*.deb || true
         sudo ldconfig
-        /usr/bin/python2.7 --version 2>&1 || true
-        # 脚本 shebang 是 #!/usr/bin/env python -> 必须指向 py2
         sudo ln -sf /usr/bin/python2.7 /usr/bin/python
-        # /usr/local/bin 在 PATH 里更靠前，这里也要压住，否则 env python 仍找到 py3
         sudo ln -sf /usr/bin/python2.7 /usr/local/bin/python
-        echo "=== python 现在指向 ==="
         python --version 2>&1
-        python -c "import sys; sys.exit(0 if sys.version_info[0]==2 else 1)" && echo "[OK] python = 2.x" || { echo "[!] python 不是 2.x"; exit 1; }
-        echo "=== repo 仍须走 python3 ==="
-        head -1 /usr/bin/repo || true
+        python -c "import sys; sys.exit(0 if sys.version_info[0]==2 else 1)" || { echo "[!] python 不是 2.x"; exit 1; }
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Building recovery
@@ -265,17 +227,14 @@ jobs:
         export JACK_SERVER_VM_ARGUMENTS="-Dfile.encoding=UTF-8 -XX:+TieredCompilation"
         lunch ${{ env.MAKEFILE_NAME }}-eng >>"$LOG" 2>&1 || { echo "[!] lunch 失败"; tail -40 "$LOG"; exit 1; }
         make clean >>"$LOG" 2>&1 || true
-        echo "[i] 开始 make，完整日志写 /tmp/build.log（不刷屏）"
         if make ${{ inputs.BUILD_TARGET }}image -j$(nproc --all) >>"$LOG" 2>&1; then
-          echo "[OK] 编译完成：$(wc -l < "$LOG") 行日志，warning $(grep -ci 'warning:' "$LOG" || true) 条"
+          echo "[OK] $(wc -l < "$LOG") 行日志，warning $(grep -ci 'warning:' "$LOG" || true) 条"
         else
-          echo "=== 编译失败：error / FAILED 摘要 ==="
           grep -E "error:|Error [0-9]|FAILED:|ninja: build stopped|No rule to make" "$LOG" | tail -40 || true
-          echo "=== 日志最后 120 行 ==="
+          echo "=== 最后 120 行 ==="
           tail -120 "$LOG"
           exit 1
         fi
-        echo "=== ccache 统计 ==="
         ccache -s || true
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
@@ -318,10 +277,10 @@ jobs:
         name: ${{ env.DEVICE_NAME }}-twrp-3.7-${{ github.run_number }}
         tag_name: twrp37-${{ github.run_id }}
         body: |
-          Manifest: ${{ env.MANIFEST_URL }} @ ${{ env.MANIFEST_BRANCH }} (TWRP 3.7.0_9)
+          Manifest: ${{ env.MANIFEST_URL }} @ ${{ env.MANIFEST_BRANCH }}
           Device: ${{ env.DEVICE_NAME }}
           Device tree: ${{ env.DEVICE_TREE_URL }} - ${{ inputs.DEVICE_TREE_BRANCH }}
           Target: ${{ inputs.BUILD_TARGET }}.img
-          触摸修复: TW_SCREEN_BLANK_ON_BOOT=${{ inputs.DISABLE_BLANK }}
+          DISABLE_BLANK: ${{ inputs.DISABLE_BLANK }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
