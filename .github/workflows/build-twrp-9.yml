@@ -126,8 +126,12 @@ jobs:
         echo "workspace-folder=$(pwd)" >> $GITHUB_OUTPUT
         git config --global user.name "i28-ci"
         git config --global user.email "i28-ci@users.noreply.github.com"
-        repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
-        grep -A2 'name="android_bootable_recovery"' .repo/manifest.xml || true
+        # twrp-extras.xml 已由 remove-minimal.xml include，default.xml 不用动 ——
+        # 手动再 include / 放到 local_manifests 会造成 remove-project 重复执行（non-existent）
+        # 和 project 重复添加（duplicate path）
+        # -g default,pdk：TeamWin 的 build/make 带 groups="pdk"，不收 pdk 组拉不到
+        repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }} -g default,pdk
+        ls .repo/manifests/twrp-extras.xml
 
     - name: 恢复 ccache
       if: ${{ inputs.fresh_ccache == false }}
