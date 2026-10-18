@@ -220,17 +220,30 @@ jobs:
 
     - name: Building recovery
       run: |
+        set -o pipefail
         LOG=/tmp/build.log
         : > "$LOG"
-        source build/envsetup.sh >>"$LOG" 2>&1 || true
+        source build/envsetup.sh 2>&1 | tee -a "$LOG" | tail -3
         export ALLOW_MISSING_DEPENDENCIES=true
         export JACK_SERVER_VM_ARGUMENTS="-Dfile.encoding=UTF-8 -XX:+TieredCompilation"
-        lunch ${{ env.MAKEFILE_NAME }}-eng >>"$LOG" 2>&1 || { echo "[!] lunch 失败"; tail -40 "$LOG"; exit 1; }
+        lunch ${{ env.MAKEFILE_NAME }}-eng 2>&1 | tee -a "$LOG" | tail -15 || { echo "[!] lunch 失败"; exit 1; }
         make clean >>"$LOG" 2>&1 || true
-        if make ${{ inputs.BUILD_TARGET }}image -j$(nproc --all) >>"$LOG" 2>&1; then
-          echo "[OK] $(wc -l < "$LOG") 行日志，warning $(grep -ci 'warning:' "$LOG" || true) 条"
+        echo "[i] make 开始：每 1% 一行进度，warning/error 实时输出；完整日志见 build-log artifact"
+        if make ${{ inputs.BUILD_TARGET }}image -j$(nproc --all) 2>&1 | tee -a "$LOG" | awk '
+            BEGIN { last = -1 }
+            /^\[ *[0-9]+%/ {
+              if (match($0, /\[ *[0-9]+%/)) {
+                p = substr($0, RSTART+1, RLENGTH-2) + 0
+                if (p != last) { print; last = p }
+              }
+              next
+            }
+            /warning:|error:|Error [0-9]|FAILED:|ninja: build stopped|No rule to make/ { print }
+          '; then
+          echo "[OK] 编译完成，warning $(grep -ci 'warning:' "$LOG" || true) 条"
         else
-          grep -E "error:|Error [0-9]|FAILED:|ninja: build stopped|No rule to make" "$LOG" | tail -40 || true
+          echo "=== 失败摘要 ==="
+          grep -E "error:|FAILED:|ninja: build stopped|No rule to make" "$LOG" | tail -40 || true
           echo "=== 最后 120 行 ==="
           tail -120 "$LOG"
           exit 1
