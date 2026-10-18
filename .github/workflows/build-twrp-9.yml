@@ -225,6 +225,31 @@ jobs:
         fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
+    - name: 装 Python2 并切为默认 python（AOSP 9.0 的 build 脚本是 py2 语法）
+      run: |
+        # build/make/tools/check_radio_versions.py 等脚本用 print "..."（py2），
+        # 22.04 已无 python2，默认 python3 会在生成 android-info.txt 时 SyntaxError。
+        BASE=http://archive.ubuntu.com/ubuntu/pool/main/p/python2.7
+        V="2.7.17-1~18.04ubuntu1.11"
+        cd /tmp
+        for p in libpython2.7-minimal libpython2.7-stdlib python2.7-minimal python2.7; do
+          f="${p}_${V}_amd64.deb"
+          curl -fsSL "$BASE/$f" -o "/tmp/$f" && echo "[+] $p" || echo "[!] $p 下载失败"
+        done
+        sudo dpkg -i --force-depends /tmp/libpython2.7-*.deb /tmp/python2.7*.deb || true
+        sudo ldconfig
+        /usr/bin/python2.7 --version 2>&1 || true
+        # 脚本 shebang 是 #!/usr/bin/env python -> 必须指向 py2
+        sudo ln -sf /usr/bin/python2.7 /usr/bin/python
+        # /usr/local/bin 在 PATH 里更靠前，这里也要压住，否则 env python 仍找到 py3
+        sudo ln -sf /usr/bin/python2.7 /usr/local/bin/python
+        echo "=== python 现在指向 ==="
+        python --version 2>&1
+        python -c "import sys; sys.exit(0 if sys.version_info[0]==2 else 1)" && echo "[OK] python = 2.x" || { echo "[!] python 不是 2.x"; exit 1; }
+        echo "=== repo 仍须走 python3 ==="
+        head -1 /usr/bin/repo || true
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
     - name: Building recovery
       run: |
         source build/envsetup.sh || true
