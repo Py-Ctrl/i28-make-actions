@@ -30,9 +30,10 @@ on:
       runner:
         description: 'Runner 标签'
         required: true
-        default: 'ubuntu-latest'
+        default: 'ubuntu-22.04'
         type: choice
         options:
+          - ubuntu-22.04
           - ubuntu-latest
           - ubuntu-latest-4-cores
           - ubuntu-latest-8-cores
@@ -100,6 +101,31 @@ jobs:
       with:
         distribution: 'zulu'
         java-version: '8'
+
+    - name: 补 ncurses5（AOSP 9.0 prebuilt clang 依赖 libtinfo.so.5）
+      run: |
+        # prebuilts/clang/host/linux-x86/clang-4691093/bin/clang.real 是 2017 年的二进制，
+        # 硬链接 libtinfo.so.5 / libncurses.so.5；Ubuntu 22.04 起只有 .so.6，
+        # 直接跑会 "error while loading shared libraries: libtinfo.so.5"。
+        # 这里装 bionic(18.04) 的 ncurses5 包，另加软链兜底。
+        BASE=http://archive.ubuntu.com/ubuntu/pool/main/n/ncurses
+        cd /tmp
+        for p in libtinfo5 libncurses5 libncursesw5 lib32tinfo5 lib32ncurses5; do
+          f="${p}_6.1-1ubuntu1.18.04.1_amd64.deb"
+          curl -fsSL "$BASE/$f" -o "/tmp/$f" && echo "[+] $p" || echo "[!] $p 下载失败"
+        done
+        sudo dpkg -i /tmp/libtinfo5_*.deb /tmp/libncurses5_*.deb /tmp/libncursesw5_*.deb \
+                      /tmp/lib32tinfo5_*.deb /tmp/lib32ncurses5_*.deb || sudo apt -y -f install
+        # 兜底：deb 没落地就直接软链 .so.6（libtinfo6 保留了 5 的符号）
+        for lib in libtinfo libncurses libncursesw; do
+          if [ ! -e "/usr/lib/x86_64-linux-gnu/${lib}.so.5" ]; then
+            sudo ln -sf "/lib/x86_64-linux-gnu/${lib}.so.6" "/usr/lib/x86_64-linux-gnu/${lib}.so.5" || true
+          fi
+        done
+        sudo ldconfig
+        echo "=== 落地检查 ==="
+        ls -l /usr/lib/x86_64-linux-gnu/libtinfo.so.5 /usr/lib/x86_64-linux-gnu/libncurses.so.5 2>&1 || true
+        ls -l /usr/lib32/libtinfo.so.5 /usr/lib32/libncurses.so.5 2>&1 || true
 
     - name: Install repo
       run: |
@@ -184,12 +210,19 @@ jobs:
       with:
         swap-size-gb: 12
 
-    - name: ccache 准备
+    - name: ccache 准备 + clang 自检
       run: |
         # 9.0 的 build/make 用 CCACHE_EXEC，manifest 自带 prebuilts/misc/linux-x86/ccache
         ccache -M 5G
         ccache -z
         ls -l prebuilts/misc/linux-x86/ccache/ccache 2>/dev/null || echo "[i] manifest 未带 ccache，将用系统 /usr/bin/ccache"
+        echo "=== prebuilt clang 能不能跑（libtinfo.so.5 是否解决）==="
+        CLANG=prebuilts/clang/host/linux-x86/clang-4691093/bin/clang.real
+        if [ -x "$CLANG" ]; then
+          "$CLANG" --version || { echo "[!] clang.real 仍起不来"; ldd "$CLANG" | grep -i 'not found' || true; exit 1; }
+        else
+          echo "[i] 未找到 clang-4691093，跳过"
+        fi
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Building recovery
