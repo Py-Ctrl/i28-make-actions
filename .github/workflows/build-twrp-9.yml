@@ -138,8 +138,11 @@ jobs:
       uses: actions/cache@v4
       with:
         path: .ccache
-        key: ccache-9.0-${{ github.run_id }}
+        # key 不带 run_id：带 run_id 每次都是唯一 key，精确匹配必然 miss，
+        # 只能靠 restore-keys 兜。固定 key 让成功的那次直接命中。
+        key: ccache-9.0-${{ env.MANIFEST_BRANCH }}
         restore-keys: |
+          ccache-9.0-${{ env.MANIFEST_BRANCH }}-
           ccache-9.0-
 
     - name: Repo Sync
