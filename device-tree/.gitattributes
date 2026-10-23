@@ -1,0 +1,13 @@
+# Android 设备树：make / init / shell 一律必须 LF
+# Windows 上检出时若被 autocrlf 转成 CRLF，会导致：
+#   - make 报 "missing separator"
+#   - init 解析 .rc 失败 -> recovery 起不来
+#   - .sh  shebang 变 "#!/bin/bash^M" -> 直接 not found
+* text=auto eol=lf
+
+# 二进制，绝不参与换行转换
+*.img   binary
+kernel  binary
+*.dat   binary
+*.bin   binary
+*.ko    binary

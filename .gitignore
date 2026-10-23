@@ -1,3 +1,6 @@
 out/
 .ccache/
 *.img
+
+# 设备树自带的 prebuilt dt.img 是构建必需，不能按 *.img 忽略
+!device-tree/prebuilt/dt.img

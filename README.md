@@ -78,3 +78,19 @@ fastboot flash recovery sp9820e_xtc_i28-recovery.img
 
 设备用的 Cypress **CYTTSP5**（I2C 0x24），已内置编译进 `prebuilt/kernel`（built-in，非 .ko），
 recovery 下无需 insmod。详见设备树仓库的 `TOUCH_DRIVER.md`。
+
+## 设备树已内嵌（device-tree/）
+
+设备树不再从 TuberMain 远端 clone，而是随本仓库分发（含 prebuilt kernel + dt.img），
+并带以下定制（改 `device-tree/` 后推本仓库即可生效）：
+
+| 文件 | 改动 | 解决的问题 |
+|---|---|---|
+| `recovery.fstab` | 删掉 `/vendor` 一行 | TWRP 报 "Unable to mount /vendor" |
+| `BoardConfig.mk` | 删 `TW_SCREEN_BLANK_ON_BOOT`；加 `TW_INTERNAL_STORAGE_PATH` / `TW_EXTERNAL_STORAGE_PATH` / `TW_HAS_MTP` | 开机不再黑屏；MTP 不再空列表（原来没有任何 storage 卷） |
+| `omni_sp9820e_xtc_i28.mk` | `PRODUCT_MODEL := D3-i28 TWRP` | MTP 设备名去掉 "(by Cms)" |
+| `recovery/root/init.recovery.sp9820e_xtc_i28.rc` | `on boot` 里 `mkdir /dev/input` + 9 条 `symlink`；新增 `service tpirq` | ueventd 只建扁平 `/dev/eventN`，TWRP 只扫 `/dev/input/` → 之前完全看不到输入设备 |
+| `recovery/root/tpirq.sh` + `device.mk` | 新脚本（sleep 15 后 `echo nobark > /sys/kernel/bbk_softdog/bbkwatchdog`） | Android 在 `sys.boot_completed=1` 时写这个节点调 `enable_cyttsp5_and_irq()`，recovery 从不写 → 触摸死。延时 15s 是等 TWRP 先扫完输入设备 |
+
+> 内核仍是设备树里的 prebuilt（未打补丁）——触摸靠上面的 `tpirq.sh` 运行时打开。
+> 若哪代内核改了 `bbk_softdog` 节点路径，同步改 `tpirq.sh` 即可。
