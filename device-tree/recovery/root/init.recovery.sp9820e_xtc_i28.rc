@@ -223,6 +223,10 @@ on property:sys.usb.config=adb
 # ueventd only creates flat /dev/eventN; TWRP scans /dev/input/ for evdev
 # devices, so without this it sees no touchscreen and no power key.
 on boot
+    # cyttsp5 probe 会 disable 自己的 IRQ；Android 在 sys.boot_completed=1 时写
+    # nobark 调 enable_cyttsp5_and_irq()（并启动看门狗定时器保持 IC 唤醒），
+    # recovery 从不写 -> 没触摸。on boot 动作在本机已验证可执行（下面的 symlink 就生效了）。
+    write /sys/kernel/bbk_softdog/bbkwatchdog "nobark"
     mkdir /dev/input 0755 root root
     symlink /dev/event0 /dev/input/event0
     symlink /dev/event1 /dev/input/event1
@@ -234,11 +238,13 @@ on boot
     symlink /dev/event7 /dev/input/event7
     symlink /dev/event8 /dev/input/event8
 
-# The cyttsp5 probe disables its IRQ. Android re-enables it from
-# /init.common.rc on property:sys.boot_completed=1 by writing 'nobark' to the
-# bbk softdog node, which calls enable_cyttsp5_and_irq() (and starts the wd
-# timer that keeps the controller awake). Recovery never does this => no touch.
-# Delayed so TWRP has finished its input scan first.
-service tpirq /sbin/sh /sbin/tpirq.sh
-    class default
-    oneshot
+# 兜底：TWRP 完成启动动作 / 配好 USB 时再写一次（幂等）。
+# 注意：service 形式在 9.0 的 init 下实测不生效，必须用 on boot / on property 动作。
+on property:twrp.action_complete=1
+    write /sys/kernel/bbk_softdog/bbkwatchdog "nobark"
+
+on property:sys.usb.config=mtp,adb
+    write /sys/kernel/bbk_softdog/bbkwatchdog "nobark"
+
+on property:sys.usb.config=adb
+    write /sys/kernel/bbk_softdog/bbkwatchdog "nobark"
