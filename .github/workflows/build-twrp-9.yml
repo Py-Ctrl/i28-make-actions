@@ -149,12 +149,21 @@ jobs:
       run: repo sync -q -j$(nproc --all) --force-sync --no-clone-bundle
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
-    - name: Clone device tree
+    - name: Use in-repo device tree
       run: |
-        git clone --depth=1 ${{ env.DEVICE_TREE_URL }} -b ${{ inputs.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        # 设备树随本仓库分发（device-tree/），不再远端 clone：
+        # 已带定制（触摸/MTP名/去 vendor/开机亮屏），且含 prebuilt kernel+dt。
+        mkdir -p "$(dirname ./${{ env.DEVICE_PATH }})"
+        cp -r "${GITHUB_WORKSPACE}/device-tree" "./${{ env.DEVICE_PATH }}"
+        ls -l ${{ env.DEVICE_PATH }}
         # 9.0 的 init 是 init.cpp，init.c.patch 打不上，vendorsetup.sh 里的 patch 会卡在交互提问
         sed -i 's|^patch -Np1|# &|' ${{ env.DEVICE_PATH }}/vendorsetup.sh
         grep -n 'patch' ${{ env.DEVICE_PATH }}/vendorsetup.sh || true
+        # Windows 签出可能带 CRLF：.rc/.mk/.fstab 必须是 LF，否则 init 解析 rc 失败
+        find ${{ env.DEVICE_PATH }} -type f \( -name '*.rc' -o -name '*.mk' -o -name '*.fstab' -o -name '*.sh' -o -name '*.patch' \) \
+          -exec sed -i 's/\r$//' {} +
+        echo '--- recovery/root ---'
+        ls -l ${{ env.DEVICE_PATH }}/recovery/root/
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: 设备 rc 注入 + BoardConfig 修正
@@ -163,12 +172,16 @@ jobs:
         BC="${{ env.DEVICE_PATH }}/BoardConfig.mk"
 
         # recovery/root 不会自动进 ramdisk，必须走 PRODUCT_COPY_FILES
-        {
-          echo ""
-          echo "PRODUCT_COPY_FILES += \\"
-          echo "    \$(LOCAL_PATH)/recovery/root/init.recovery.sp9820e_xtc_i28.rc:root/init.recovery.sp9820e_xtc_i28.rc \\"
-          echo "    \$(LOCAL_PATH)/recovery/root/ueventd.sp9820e_xtc_i28.rc:root/ueventd.sp9820e_xtc_i28.rc"
-        } >> "$MK"
+        # （device.mk 里已有同样三条；这里再补一次防止设备树改动漏掉 tpirq.sh）
+        if ! grep -q 'tpirq.sh' "$MK"; then
+          {
+            echo ""
+            echo "PRODUCT_COPY_FILES += \\"
+            echo "    \$(LOCAL_PATH)/recovery/root/init.recovery.sp9820e_xtc_i28.rc:root/init.recovery.sp9820e_xtc_i28.rc \\"
+            echo "    \$(LOCAL_PATH)/recovery/root/ueventd.sp9820e_xtc_i28.rc:root/ueventd.sp9820e_xtc_i28.rc \\"
+            echo "    \$(LOCAL_PATH)/recovery/root/tpirq.sh:root/sbin/tpirq.sh"
+          } >> "$MK"
+        fi
 
         if [ "${{ inputs.DISABLE_BLANK }}" == "true" ]; then
           sed -i 's/^TW_SCREEN_BLANK_ON_BOOT := true/TW_SCREEN_BLANK_ON_BOOT := false/' "$BC"
