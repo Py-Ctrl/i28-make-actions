@@ -166,6 +166,22 @@ jobs:
         ls -l ${{ env.DEVICE_PATH }}/recovery/root/
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
+    - name: Patch TWRP MTP (per-storage removable)
+      run: |
+        # TWRP 把每个 storage 的 removable 硬编码为 false（mtp_MtpServer.cpp 里
+        # 写死 "bool removable = false;"，且 struct mtpmsg 没有这个字段）。
+        # Windows 对多个 "固定磁盘" 的 storage 只显示第一个（Internal storage），
+        # 其余被折叠掉 —— 表现就是 /xtcdata、/productinfo 在资源管理器里看不到。
+        # 改成 true，让每个卷独立显示为可移动设备。
+        F="bootable/recovery/mtp/ffs/mtp_MtpServer.cpp"
+        if [ ! -f "$F" ]; then
+          echo "::error::找不到 $F"; exit 1
+        fi
+        sed -i 's/bool removable = false;/bool removable = true;/' "$F"
+        echo '--- patched ---'
+        grep -n 'bool removable' "$F"
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
     - name: 设备 rc 注入 + BoardConfig 修正
       run: |
         MK="${{ env.DEVICE_PATH }}/device.mk"
