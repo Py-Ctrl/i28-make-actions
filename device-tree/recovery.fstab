@@ -1,4 +1,4 @@
-/system            ext4     /dev/block/platform/soc/by-name/system           flags=display=system
+/system            ext4     /dev/block/platform/soc/by-name/system           flags=display=system;storage;storagename=System
 /data              ext4     /dev/block/platform/soc/by-name/userdata         flags=display=userdata;storage;storagename=UserData
 /cache             ext4     /dev/block/platform/soc/by-name/cache            flags=display=cache
 /misc              emmc     /dev/block/platform/soc/by-name/misc             flags=display=misc

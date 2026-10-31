@@ -87,6 +87,13 @@ TW_EXTRA_LANGUAGES:=true
 BOARD_RECOVERY_SWIPE:=true
 TW_DEFAULT_LANGUAGE := zh-CN
 BOARD_HAS_NO_REAL_SDCARD := true
+
+# /data/media 模拟存储：没有这个宏时 twrp.cpp 里 datamedia 恒为 false，
+# Setup_Data_Media() 不会执行，Storage_Path 就停在 /data 整个分区。
+# MTP 客户端要递归索引 /data 下上万个文件（app/data/system/...），
+# Windows 端会超时并显示空白 —— 这就是 "UserData 卷读不了" 的原因。
+# 开启后 Storage_Path 变成 /data/media/0，只暴露用户数据。
+RECOVERY_SDCARD_ON_DATA := true
 # MTP storage: without these TWRP's storage list is empty and MTP shows nothing
 TW_INTERNAL_STORAGE_PATH := "/data"
 TW_INTERNAL_STORAGE_MOUNT_POINT := "data"
