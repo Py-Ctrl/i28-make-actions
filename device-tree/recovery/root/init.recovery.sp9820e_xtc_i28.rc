@@ -238,6 +238,94 @@ on boot
     symlink /dev/event7 /dev/input/event7
     symlink /dev/event8 /dev/input/event8
 
+    # --- by-name links for TWRP recovery.fstab ---------------------------
+    # Android 5.1 的 ueventd 会在 /dev/block/platform/<ctrl>/by-name/ 下自动
+    # 建分区名链接；Android 9 的 ueventd 不再做这件事（内核 uevent 里仍有
+    # PARTNAME，但没人用它建链接）。recovery.fstab 全部用 by-name 路径，
+    # 链接缺失 => Actual_Block_Device 为空 => mount("") 返回 EINVAL，
+    # 表现为 /system /cache /data /productinfo 全部 "Invalid argument"。
+    # 映射取自内核 /sys/block/mmcblk0/mmcblk0p*/uevent 的 PARTNAME。
+    mkdir /dev/block/platform 0755 root root
+    mkdir /dev/block/platform/soc 0755 root root
+    mkdir /dev/block/platform/soc/by-name 0755 root root
+    mkdir /dev/block/by-name 0755 root root
+    symlink /dev/block/mmcblk0p1 /dev/block/platform/soc/by-name/prodnv
+    symlink /dev/block/mmcblk0p2 /dev/block/platform/soc/by-name/miscdata
+    symlink /dev/block/mmcblk0p3 /dev/block/platform/soc/by-name/recovery
+    symlink /dev/block/mmcblk0p4 /dev/block/platform/soc/by-name/misc
+    symlink /dev/block/mmcblk0p5 /dev/block/platform/soc/by-name/trustos
+    symlink /dev/block/mmcblk0p6 /dev/block/platform/soc/by-name/trustos_bak
+    symlink /dev/block/mmcblk0p7 /dev/block/platform/soc/by-name/sml
+    symlink /dev/block/mmcblk0p8 /dev/block/platform/soc/by-name/sml_bak
+    symlink /dev/block/mmcblk0p9 /dev/block/platform/soc/by-name/uboot
+    symlink /dev/block/mmcblk0p10 /dev/block/platform/soc/by-name/uboot_bak
+    symlink /dev/block/mmcblk0p11 /dev/block/platform/soc/by-name/logo
+    symlink /dev/block/mmcblk0p12 /dev/block/platform/soc/by-name/fbootlogo
+    symlink /dev/block/mmcblk0p13 /dev/block/platform/soc/by-name/l_fixnv1
+    symlink /dev/block/mmcblk0p14 /dev/block/platform/soc/by-name/l_fixnv2
+    symlink /dev/block/mmcblk0p15 /dev/block/platform/soc/by-name/l_runtimenv1
+    symlink /dev/block/mmcblk0p16 /dev/block/platform/soc/by-name/l_runtimenv2
+    symlink /dev/block/mmcblk0p17 /dev/block/platform/soc/by-name/gpsgl
+    symlink /dev/block/mmcblk0p18 /dev/block/platform/soc/by-name/gpsbd
+    symlink /dev/block/mmcblk0p19 /dev/block/platform/soc/by-name/wcnmodem
+    symlink /dev/block/mmcblk0p20 /dev/block/platform/soc/by-name/persist
+    symlink /dev/block/mmcblk0p21 /dev/block/platform/soc/by-name/l_modem
+    symlink /dev/block/mmcblk0p22 /dev/block/platform/soc/by-name/l_deltanv
+    symlink /dev/block/mmcblk0p23 /dev/block/platform/soc/by-name/l_gdsp
+    symlink /dev/block/mmcblk0p24 /dev/block/platform/soc/by-name/l_ldsp
+    symlink /dev/block/mmcblk0p25 /dev/block/platform/soc/by-name/pm_sys
+    symlink /dev/block/mmcblk0p26 /dev/block/platform/soc/by-name/boot
+    symlink /dev/block/mmcblk0p27 /dev/block/platform/soc/by-name/system
+    symlink /dev/block/mmcblk0p28 /dev/block/platform/soc/by-name/cache
+    symlink /dev/block/mmcblk0p29 /dev/block/platform/soc/by-name/vendor
+    symlink /dev/block/mmcblk0p30 /dev/block/platform/soc/by-name/expdb
+    symlink /dev/block/mmcblk0p31 /dev/block/platform/soc/by-name/xtcinfo
+    symlink /dev/block/mmcblk0p32 /dev/block/platform/soc/by-name/oem
+    symlink /dev/block/mmcblk0p33 /dev/block/platform/soc/by-name/dloadflag
+    symlink /dev/block/mmcblk0p34 /dev/block/platform/soc/by-name/xtcdata
+    symlink /dev/block/mmcblk0p35 /dev/block/platform/soc/by-name/miscdat_bak
+    symlink /dev/block/mmcblk0p36 /dev/block/platform/soc/by-name/nv_bak
+    symlink /dev/block/mmcblk0p37 /dev/block/platform/soc/by-name/xtcdebug
+    symlink /dev/block/mmcblk0p38 /dev/block/platform/soc/by-name/userdata
+    symlink /dev/block/mmcblk0p1 /dev/block/by-name/prodnv
+    symlink /dev/block/mmcblk0p2 /dev/block/by-name/miscdata
+    symlink /dev/block/mmcblk0p3 /dev/block/by-name/recovery
+    symlink /dev/block/mmcblk0p4 /dev/block/by-name/misc
+    symlink /dev/block/mmcblk0p5 /dev/block/by-name/trustos
+    symlink /dev/block/mmcblk0p6 /dev/block/by-name/trustos_bak
+    symlink /dev/block/mmcblk0p7 /dev/block/by-name/sml
+    symlink /dev/block/mmcblk0p8 /dev/block/by-name/sml_bak
+    symlink /dev/block/mmcblk0p9 /dev/block/by-name/uboot
+    symlink /dev/block/mmcblk0p10 /dev/block/by-name/uboot_bak
+    symlink /dev/block/mmcblk0p11 /dev/block/by-name/logo
+    symlink /dev/block/mmcblk0p12 /dev/block/by-name/fbootlogo
+    symlink /dev/block/mmcblk0p13 /dev/block/by-name/l_fixnv1
+    symlink /dev/block/mmcblk0p14 /dev/block/by-name/l_fixnv2
+    symlink /dev/block/mmcblk0p15 /dev/block/by-name/l_runtimenv1
+    symlink /dev/block/mmcblk0p16 /dev/block/by-name/l_runtimenv2
+    symlink /dev/block/mmcblk0p17 /dev/block/by-name/gpsgl
+    symlink /dev/block/mmcblk0p18 /dev/block/by-name/gpsbd
+    symlink /dev/block/mmcblk0p19 /dev/block/by-name/wcnmodem
+    symlink /dev/block/mmcblk0p20 /dev/block/by-name/persist
+    symlink /dev/block/mmcblk0p21 /dev/block/by-name/l_modem
+    symlink /dev/block/mmcblk0p22 /dev/block/by-name/l_deltanv
+    symlink /dev/block/mmcblk0p23 /dev/block/by-name/l_gdsp
+    symlink /dev/block/mmcblk0p24 /dev/block/by-name/l_ldsp
+    symlink /dev/block/mmcblk0p25 /dev/block/by-name/pm_sys
+    symlink /dev/block/mmcblk0p26 /dev/block/by-name/boot
+    symlink /dev/block/mmcblk0p27 /dev/block/by-name/system
+    symlink /dev/block/mmcblk0p28 /dev/block/by-name/cache
+    symlink /dev/block/mmcblk0p29 /dev/block/by-name/vendor
+    symlink /dev/block/mmcblk0p30 /dev/block/by-name/expdb
+    symlink /dev/block/mmcblk0p31 /dev/block/by-name/xtcinfo
+    symlink /dev/block/mmcblk0p32 /dev/block/by-name/oem
+    symlink /dev/block/mmcblk0p33 /dev/block/by-name/dloadflag
+    symlink /dev/block/mmcblk0p34 /dev/block/by-name/xtcdata
+    symlink /dev/block/mmcblk0p35 /dev/block/by-name/miscdat_bak
+    symlink /dev/block/mmcblk0p36 /dev/block/by-name/nv_bak
+    symlink /dev/block/mmcblk0p37 /dev/block/by-name/xtcdebug
+    symlink /dev/block/mmcblk0p38 /dev/block/by-name/userdata
+
 # 兜底：TWRP 完成启动动作 / 配好 USB 时再写一次（幂等）。
 # 注意：service 形式在 9.0 的 init 下实测不生效，必须用 on boot / on property 动作。
 on property:twrp.action_complete=1
