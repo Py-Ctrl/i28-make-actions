@@ -305,7 +305,7 @@ jobs:
     - name: 镜像自检
       continue-on-error: true
       run: |
-        IMG=workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ inputs.BUILD_TARGET }}.img
+        IMG=out/target/product/${{ env.DEVICE_NAME }}/${{ inputs.BUILD_TARGET }}.img
         ls -l "$IMG"
         echo "magic     : $(head -c 8 "$IMG")"
         echo "kernel_sz : $(od -An -tu4 -j8  -N4 "$IMG" | tr -d ' ')"
