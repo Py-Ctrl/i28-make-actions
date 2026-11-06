@@ -74,14 +74,25 @@ jobs:
 
     - name: Prepare the environment
       run: |
-        sudo apt -qq update
-        sudo apt -y -qq upgrade
-        sudo apt -y install gperf gcc-multilib g++-multilib libc6-dev libx11-dev tree \
-          lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev \
-          lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libxml2 lzop pngcrush \
-          schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static \
-          python3 zip unzip || true
-        sudo apt -y install lib32ncurses-dev libncurses5 || true
+        # 逐包安装：ubuntu-latest(24.04) 移除了 liblz4-tool / libxml2 / libncurses5 /
+        # qemu-user-static 等包，以前整条 apt install 只要有一个装不上就**全部不装**，
+        # 结果 ccache 缺失、最后一行 "ccache: command not found" 直接退出 127。
+        # 拆开后兼容 22.04 与 24.04，个别可选包缺失不影响主流程。
+        sudo apt-get -qq update
+        PKGS="gperf gcc-multilib g++-multilib libc6-dev libx11-dev tree \
+              lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev \
+              lib32z1-dev liblz4-tool lz4 libncurses5-dev libsdl1.2-dev libxml2 lzop pngcrush \
+              schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static \
+              python3 zip unzip libtinfo6 libncurses-dev lib32ncurses-dev libncurses5"
+        for p in $PKGS; do
+          if sudo apt-get -y -qq install "$p" >/tmp/apt-one.log 2>&1; then
+            echo "[+] $p"
+          else
+            echo "[!] $p 装不上，跳过：$(tail -1 /tmp/apt-one.log)"
+          fi
+        done
+        # ccache 是硬依赖：装不上就在这里明确失败，别让后面莫名其妙地挂
+        command -v ccache >/dev/null || { echo "::error::ccache 未安装"; exit 1; }
         ccache --version | head -n 1
 
     - name: Install OpenJDK 8
@@ -92,7 +103,7 @@ jobs:
 
     - name: 补 ncurses5
       run: |
-        # clang-4691093 要 libtinfo.so.5，22.04 只有 .so.6
+        # clang-4691093 要 libtinfo.so.5，22.04 / 24.04 默认只有 .so.6
         BASE=http://archive.ubuntu.com/ubuntu/pool/main/n/ncurses
         cd /tmp
         for p in libtinfo5 libncurses5 libncursesw5 lib32tinfo5 lib32ncurses5; do
@@ -241,7 +252,7 @@ jobs:
 
     - name: 装 Python2
       run: |
-        # build/make 脚本是 py2 语法，22.04 无 python2
+        # build/make 脚本是 py2 语法，22.04 / 24.04 都没有 python2
         BASE=http://archive.ubuntu.com/ubuntu/pool/main/p/python2.7
         V="2.7.17-1~18.04ubuntu1.11"
         cd /tmp
