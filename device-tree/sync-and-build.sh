@@ -4,20 +4,22 @@
 #  适用于一台干净的 Ubuntu 20.04/22.04（物理机 / 云主机 / 虚拟机均可）
 #
 #  用法:
-#     export TWRP_BRANCH=twrp-11        # TWRP 分支，见下方说明
+#     export TWRP_BRANCH=twrp-9.0       # TWRP 分支，见下方说明
 #     bash sync-and-build.sh
 #
 #  磁盘需求: >=150GB    内存: >=16GB（32G 更稳）    时间: 同步 1-3h + 编译 1-3h
+#
+#  注意: 本脚本仅供参考，可复现的构建流程见仓库根目录
+#        .github/workflows/build-twrp-9.yml
 # =============================================================
 set -e
 
 DEVICE=sp9820e_xtc_i28
 SRC="${TWRP_SRC:-$HOME/twrp}"
-# TWRP 官方 minimal manifest 分支，按你的源码树选：
-#   twrp-9.0  -> TWRP 3.3/3.4（老设备、kernel 3.x/4.4 兼容性最好）
-#   twrp-11   -> TWRP 3.6/3.7（默认，arm 32-bit 仍受支持）
-#   twrp-12.1 -> TWRP 3.7
-BRANCH="${TWRP_BRANCH:-twrp-11}"
+# TWRP 官方 minimal manifest 分支：
+#   twrp-9.0  -> TWRP 3.7.0_9（默认；本机唯一验证可正常引导的组合，与 CI 一致）
+#   twrp-11   -> 需要更新的构建依赖，这台 4.4 内核 + ADF 显示驱动的设备不适用
+BRANCH="${TWRP_BRANCH:-twrp-9.0}"
 MANIFEST="https://github.com/minimal-manifest-twrp/platform_manifest_twrp.git"
 DEVICE_REPO="https://github.com/TuberMain/twrp_device_sp9820e_xtc_i28"
 DEVICE_BRANCH="twrp-4.4"
@@ -28,6 +30,10 @@ echo "[*] TWRP 分支: $BRANCH"
 # ---------- 1. 装依赖 ----------
 if ! command -v repo >/dev/null 2>&1; then
     echo "[*] 安装编译依赖 (需要 sudo)"
+    # 注意: twrp-9.0 的 build/make 还需要 JDK 8、Python2 和 ncurses5
+    #       (libtinfo.so.5)。下面这套 apt 依赖是给较新源码树用的，
+    #       用 9.0 时请参照 CI workflow 的
+    #       "Install OpenJDK 8" / "装 Python2" / "补 ncurses5" 三步补装。
     sudo apt-get update
     sudo apt-get install -y --no-install-recommends \
         git-core gnupg flex bison build-essential zip curl zlib1g-dev \

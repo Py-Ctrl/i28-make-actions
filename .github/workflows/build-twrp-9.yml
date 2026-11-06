@@ -19,7 +19,7 @@ on:
       runner:
         description: 'Runner 标签'
         required: true
-        default: 'ubuntu-22.04'
+        default: 'ubuntu-latest'
         type: choice
         options:
           - ubuntu-22.04
