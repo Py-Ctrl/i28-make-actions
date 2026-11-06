@@ -149,9 +149,13 @@ jobs:
       uses: actions/cache@v4
       with:
         path: .ccache
-        # key 不带 run_id：带 run_id 每次都是唯一 key，精确匹配必然 miss，
-        # 只能靠 restore-keys 兜。固定 key 让成功的那次直接命中。
-        key: ccache-9.0-${{ env.MANIFEST_BRANCH }}
+        # 每次用唯一 key，Post 步骤才会把本次编译产生的新缓存保存下来。
+        # 固定 key 的坑：主键精确命中后 actions/cache 输出
+        #   "Cache hit occurred on the primary key ... not saving cache"
+        # 缓存永远停在第一次成功那一版；换 OS / 改源码后命中率会跌到个位数
+        # （实测 5.58%，等于全量重编），且新结果全部丢弃。
+        # restore-keys 前缀恢复到最近一次缓存，是 actions/cache 的标准用法。
+        key: ccache-9.0-${{ env.MANIFEST_BRANCH }}-${{ github.run_id }}
         restore-keys: |
           ccache-9.0-${{ env.MANIFEST_BRANCH }}-
           ccache-9.0-
