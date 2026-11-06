@@ -271,6 +271,10 @@ jobs:
     - name: Building recovery
       run: |
         set -o pipefail
+        # ubuntu-latest(24.04) 默认 locale 下 sort / comm 的排序规则不一致，
+        # bionic 的 mini debuginfo 步骤会报 "comm: input is not in sorted order"
+        # 并让 ninja 在 84% 处停下。统一成 C locale 即可（AOSP 官方也推荐）。
+        export LC_ALL=C
         LOG=/tmp/build.log
         : > "$LOG"
         # source/lunch 必须留在当前 shell：进管道会开子 shell，lunch 函数和 TARGET_* 变量都会丢
