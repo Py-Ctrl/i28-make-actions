@@ -193,6 +193,41 @@ jobs:
         grep -n 'bool removable' "$F"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
+    - name: Patch AOSP mini-debuginfo locale (24.04)
+      run: |
+        # AOSP 9 的 mini debuginfo 规则是 "... | sort > a && comm -13 a b > keep"。
+        # ubuntu-latest(24.04) runner 默认 LC_ALL=C.UTF-8，这个 locale 下
+        # sort 与 comm 的排序规则不一致，ninja 会在 84% 处报
+        #   comm: input is not in sorted order
+        # 并中断构建。step 里 export LC_ALL=C 无效：soong_ui 会构造一份干净
+        # 环境传给 ninja，白名单外的变量被丢掉。所以直接改规则本身，
+        # 让 sort / comm 自带 LC_ALL=C，与 runner locale 无关。
+        python3 - <<'PY'
+        import pathlib
+        hits = 0
+        for p in pathlib.Path('build').rglob('*'):
+            if not p.is_file():
+                continue
+            try:
+                s = p.read_text()
+            except (UnicodeDecodeError, OSError):
+                continue
+            if 'comm -13' not in s:
+                continue
+            orig = s
+            s = s.replace('| sort >', '| LC_ALL=C sort >')
+            if 'LC_ALL=C comm -13' not in s:
+                s = s.replace('comm -13', 'LC_ALL=C comm -13')
+            s = s.replace('LC_ALL=C LC_ALL=C ', 'LC_ALL=C ')  # 幂等
+            if s != orig:
+                p.write_text(s)
+                hits += 1
+                print('[+] patched', p)
+        print('patched files:', hits)
+        PY
+        grep -rn "LC_ALL=C comm -13" build/ | head -3 || echo "[!] 未匹配到规则，请检查 AOSP 版本"
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
     - name: 设备 rc 注入 + BoardConfig 修正
       run: |
         MK="${{ env.DEVICE_PATH }}/device.mk"
