@@ -3,25 +3,40 @@
 在 GitHub Actions 上给 **XTC i28（sp9820e_xtc_i28）** 编译 TWRP recovery。
 本机是 Windows / 没有 Linux 编译环境时走这条路。
 
-- 设备树：`TuberMain/twrp_device_sp9820e_xtc_i28`（分支 `twrp-4.4`）
-- 源码：`minimal-manifest-twrp` 官方 minimal manifest
-- 产物：`sp9820e_xtc_i28-recovery.img`（Actions Artifact，保留 30 天）
+- 设备树：随本仓库分发在 `device-tree/`（含 prebuilt kernel + dt.img），不再远端 clone
+- 源码：`minimal-manifest-twrp` 的 **`twrp-9.0`** 分支 → TWRP 3.7.0_9
+- 产物：`recovery.img`（Actions Artifact，名如 `sp9820e_xtc_i28-twrp-3.7-<run>`）
+- 唯一构建线：`.github/workflows/build-twrp-9.yml`
+
+> 旧的三条构建线已删除：`build-twrp.yml`（KitKat 4.4，编出的 3.1 卡第一屏）、
+> `build-twrp-modern.yml`（twrp-11/12.1/14，从未跑过）、`probe-runner.yml`（探测 runner 用）。
+> 需要的话可从 git 历史恢复：`git checkout <旧commit> -- .github/workflows/<文件名>`。
 
 ## 用法
 
-1. 推到 GitHub 后，打开仓库 → **Actions** → 右侧 **Build TWRP for XTC i28** → **Run workflow**
+1. 打开仓库 → **Actions** → **Build TWRP 3.7 (Android 9.0)** → **Run workflow**
 2. 参数：
-   - `twrp_branch` — TWRP 分支，**不确定就先 `twrp-11`**，编不过再试 `twrp-9.0`/`twrp-12.1`
-   - `device_branch` — 设备树分支，默认 `twrp-4.4`
-   - `target` — `recoveryimage`（默认）或 `bootimage`
+   - `DEVICE_TREE_BRANCH` — 设备树分支，固定 `twrp-4.4`
+   - `runner` — 默认 `ubuntu-22.04`（可选 `ubuntu-latest-4/8/16-cores`）
+   - `BUILD_TARGET` — `recovery`（默认）或 `boot`
+   - `DISABLE_BLANK` — **必须 true**：关掉开机黑屏，否则 ADF 会给触摸 IC 发 POWERDOWN
    - `fresh_ccache` — 勾上则丢弃 ccache 全新编译
-3. 跑完在 Artifacts 里下载镜像。
+3. 跑完在 Artifacts 里下载（约 20–40 分钟，ccache 命中更快）。
+
+也可直接调 API 触发：
+
+```sh
+curl -u <user>:<token> -X POST \
+  -H "Accept: application/vnd.github+json" \
+  https://api.github.com/repos/Py-Ctrl/i28-make-actions/actions/workflows/build-twrp-9.yml/dispatches \
+  -d '{"ref":"main","inputs":{"DEVICE_TREE_BRANCH":"twrp-4.4","runner":"ubuntu-22.04","BUILD_TARGET":"recovery","DISABLE_BLANK":"true","fresh_ccache":"false"}}'
+```
 
 刷机：
 
 ```sh
-fastboot boot  sp9820e_xtc_i28-recovery.img   # 临时启动，不写入
-fastboot flash recovery sp9820e_xtc_i28-recovery.img
+fastboot boot  recovery.img   # 临时启动，不写入
+fastboot flash recovery recovery.img
 ```
 
 ## 流程说明
